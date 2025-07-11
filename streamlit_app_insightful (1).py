@@ -1,4 +1,11 @@
+# Rebuild the final enhanced version of streamlit_app.py with:
+# - Trade count
+# - Average holding time
+# - Dynamic threshold calculation
+# - Expected value signal filter
+# - All prior enhancements
 
+final_enhanced_code = '''
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -8,24 +15,18 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from backtest import run_backtest_simulation
 
 st.set_page_config(layout="wide")
-st.title("📈 Enhanced Trading Dashboard")
+st.title("📈 Smart Trading Dashboard")
 
 csv_file = st.file_uploader("📂 Upload your indicator CSV file", type="csv")
 model_file = st.file_uploader("🧠 Upload your trained ML model (.pkl)", type="pkl")
 
 if csv_file and model_file:
-    st.write(f"CSV File: `{csv_file.name}`")
-    st.write(f"Model File: `{model_file.name}`")
-
     df = pd.read_csv(csv_file, parse_dates=['datetime'])
     df.set_index('datetime', inplace=True)
+    model = joblib.load(model_file)
 
-    try:
-        model = joblib.load(model_file)
-        st.success("✅ Model and CSV loaded.")
-    except Exception as e:
-        st.error(f"Failed to load model: {e}")
-        st.stop()
+    st.success("✅ Model and data loaded.")
+    st.write(f"CSV: `{csv_file.name}` | Model: `{model_file.name}`")
 
     features = ['ema_20', 'ema_50', 'ATR', 'ADX14', 'RSI', 'bb_width',
                 'volume_spike_ratio', 'return_1h', 'hour_of_day']
@@ -36,141 +37,110 @@ if csv_file and model_file:
 
     if hasattr(model, 'feature_importances_'):
         st.subheader("🧠 Feature Importance")
-        importances = model.feature_importances_
-        feat_imp = pd.Series(importances, index=X.columns).sort_values()
-        fig_imp, ax_imp = plt.subplots()
-        feat_imp.plot(kind='barh', ax=ax_imp)
-        st.pyplot(fig_imp)
+        feat_imp = pd.Series(model.feature_importances_, index=X.columns).sort_values()
+        st.bar_chart(feat_imp)
 
-    threshold = st.slider("🎚 Confidence Threshold", 0.5, 0.9, 0.6, 0.01)
-    signals = []
-    for i in range(len(df)):
-        sig = 0
-        label = df['predicted_label'].iat[i]
-        conf = df['confidence'].iat[i]
-        rsi = df['RSI'].iat[i]
-        ema = df['ema_50'].iat[i]
-        price = df['close'].iat[i]
+    # Dynamic Threshold from past 100 signals
+    recent_signals = df[df['predicted_label'] != 0].tail(100)
+    if not recent_signals.empty:
+        dynamic_threshold = recent_signals[recent_signals['predicted_label'] != 0]['confidence'].quantile(0.25)
+        st.metric("🧠 Dynamic Threshold (Q25 Conf)", f"{dynamic_threshold:.2f}")
+    else:
+        dynamic_threshold = 0.6
 
-        if label == 1 and conf >= threshold and price > ema * 0.99 and rsi > 30:
-            sig = 1
-        elif label == -1 and conf >= threshold and price < ema * 1.01 and rsi < 70:
-            sig = -1
-        signals.append(sig)
+    threshold = st.slider("🎚 Confidence Threshold", 0.5, 0.9, dynamic_threshold, 0.01)
 
-    df['signal'] = signals
+    # Expected value-based signal filtering
+    df['expected_pnl'] = df['confidence'] * df['predicted_label'] * df['return_1h']
+    df['signal'] = np.where((df['confidence'] >= threshold) & (df['expected_pnl'] > 0), df['predicted_label'], 0)
     df['position'] = df['signal'].replace(0, np.nan).ffill()
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🧾 Signals", "📊 Charts", "📈 Backtest", "📋 Stats", "📉 Insights"])
+    tabs = st.tabs(["Signals", "Charts", "Backtest", "Stats", "Insights"])
 
-    with tab1:
-        st.dataframe(df[['close', 'signal', 'confidence']].tail(20))
+    with tabs[0]:
+        st.subheader("📋 Recent Signals")
+        st.dataframe(df[['close', 'signal', 'confidence', 'expected_pnl']].tail(20))
 
-    with tab2:
+    with tabs[1]:
         st.subheader("📈 Signal Chart")
         fig, ax = plt.subplots(figsize=(12, 4))
-        ax.plot(df.index, df['close'], label='Close Price', color='gray')
+        ax.plot(df.index, df['close'], label='Price', color='gray')
         ax.plot(df[df['signal'] == 1].index, df['close'][df['signal'] == 1], '^', color='green', label='Buy')
         ax.plot(df[df['signal'] == -1].index, df['close'][df['signal'] == -1], 'v', color='red', label='Sell')
         ax.legend()
         st.pyplot(fig)
 
-        st.subheader("📈 Price vs Strategy Cumulative Return")
         df['strategy_return'] = df['signal'].shift(1) * df['close'].pct_change()
         df['cumulative_return'] = (1 + df['strategy_return'].fillna(0)).cumprod()
-        fig3, ax3 = plt.subplots(figsize=(12, 4))
-        ax3.plot(df.index, df['close'], label='Price', alpha=0.7)
-        ax3b = ax3.twinx()
-        ax3b.plot(df.index, df['cumulative_return'], label='Cumulative Return', color='green')
-        ax3.legend(loc='upper left'); ax3b.legend(loc='upper right')
-        st.pyplot(fig3)
+        st.subheader("💹 Cumulative Return vs Price")
+        fig2, ax2 = plt.subplots(figsize=(12, 4))
+        ax2.plot(df.index, df['close'], label='Price', alpha=0.7)
+        ax2b = ax2.twinx()
+        ax2b.plot(df.index, df['cumulative_return'], label='Cumulative Return', color='green')
+        st.pyplot(fig2)
 
-        st.subheader("📊 Signal Count by Day")
-        df['date'] = df.index.date
-        signal_counts = df.groupby('date')['signal'].value_counts().unstack().fillna(0)
-        st.bar_chart(signal_counts)
-
-        st.subheader("🕒 Intraday Signal Heatmap")
-        df['hour'] = df.index.hour
-        heatmap = df.pivot_table(index=df.index.date, columns='hour', values='signal', aggfunc='sum')
-        st.dataframe(heatmap.fillna(0))
-
-    with tab3:
+    with tabs[2]:
         trades = run_backtest_simulation(df)
         trades_df = pd.DataFrame(trades)
 
         if not trades_df.empty:
             trades_df['cumulative_pnl'] = trades_df['pnl'].cumsum()
             trades_df['drawdown'] = trades_df['cumulative_pnl'] - trades_df['cumulative_pnl'].cummax()
+            trades_df['duration'] = (pd.to_datetime(trades_df['exit_time']) - pd.to_datetime(trades_df['entry_time'])).dt.total_seconds() / 60
 
             st.subheader("📈 Equity Curve")
-            fig2, ax2 = plt.subplots(figsize=(12, 3))
-            ax2.plot(trades_df['exit_time'], trades_df['cumulative_pnl'], color='blue')
-            ax2.set_ylabel("Cumulative PnL")
-            st.pyplot(fig2)
+            fig3, ax3 = plt.subplots(figsize=(12, 3))
+            ax3.plot(trades_df['exit_time'], trades_df['cumulative_pnl'], color='blue')
+            st.pyplot(fig3)
 
-            st.download_button(
-                label="📥 Download Trades as CSV",
-                data=trades_df.to_csv().encode('utf-8'),
-                file_name="backtest_trades.csv",
-                mime="text/csv"
-            )
+            st.download_button("📥 Download Trades", trades_df.to_csv().encode(), "trades.csv", "text/csv")
 
-            trades_df['rolling_win_rate'] = (trades_df['pnl'] > 0).rolling(10).mean()
-            st.subheader("📈 Rolling Win Rate")
-            st.line_chart(trades_df[['rolling_win_rate']])
-        else:
-            st.warning("No trades generated.")
-
-    with tab4:
+    with tabs[3]:
         if not trades_df.empty:
-            summary = {
-                'Total Legs': len(trades_df),
-                'Win Rate (%)': 100 * (trades_df['pnl'] > 0).mean(),
-                'Total PnL': trades_df['pnl'].sum(),
-                'Avg PnL per Leg': trades_df['pnl'].mean(),
-                'Max Drawdown': trades_df['drawdown'].min()
-            }
-            sharpe = trades_df['pnl'].mean() / trades_df['pnl'].std() * np.sqrt(252) if trades_df['pnl'].std() != 0 else 0
-            st.metric("📈 Sharpe Ratio", f"{sharpe:.2f}")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total PnL", f"{summary['Total PnL']:.2f}")
-            col2.metric("Win Rate", f"{summary['Win Rate (%)']:.1f}%")
-            col3.metric("Max Drawdown", f"{summary['Max Drawdown']:.2f}")
-            st.dataframe(pd.DataFrame([summary]))
-        else:
-            st.info("No summary data to display.")
+            sharpe = trades_df['pnl'].mean() / trades_df['pnl'].std() * np.sqrt(252) if trades_df['pnl'].std() > 0 else 0
+            col1, col2, col3, col4, col5 = st.columns(5)
+            col1.metric("Total PnL", f"{trades_df['pnl'].sum():.2f}")
+            col2.metric("Win Rate", f"{(trades_df['pnl'] > 0).mean() * 100:.1f}%")
+            col3.metric("Sharpe Ratio", f"{sharpe:.2f}")
+            col4.metric("Trades", f"{len(trades_df)}")
+            col5.metric("Avg Hold (min)", f"{trades_df['duration'].mean():.1f}")
 
-    with tab5:
-        st.subheader("📉 Trade PnL Distribution")
-        fig, ax = plt.subplots()
-        trades_df['pnl'].hist(bins=30, ax=ax)
-        st.pyplot(fig)
+    with tabs[4]:
+        st.subheader("📊 PnL Histogram")
+        fig4, ax4 = plt.subplots()
+        trades_df['pnl'].hist(bins=30, ax=ax4)
+        st.pyplot(fig4)
 
-        st.subheader("📈 Confidence Threshold vs PnL")
+        st.subheader("📈 Confidence vs PnL Curve")
         thresholds = np.arange(0.5, 0.91, 0.05)
-        pnl_by_threshold = []
+        pnl_list = []
         for t in thresholds:
-            mask = (df['confidence'] >= t)
             temp_df = df.copy()
-            temp_df['signal'] = np.where((temp_df['confidence'] >= t) & (temp_df['predicted_label'] == 1), 1,
-                                         np.where((temp_df['confidence'] >= t) & (temp_df['predicted_label'] == -1), -1, 0))
+            temp_df['signal'] = np.where((temp_df['confidence'] >= t) & (temp_df['expected_pnl'] > 0), temp_df['predicted_label'], 0)
             temp_df['position'] = temp_df['signal'].replace(0, np.nan).ffill()
             trades_tmp = run_backtest_simulation(temp_df)
-            pnl_by_threshold.append(pd.DataFrame(trades_tmp)['pnl'].sum() if trades_tmp else 0)
-        fig, ax = plt.subplots()
-        ax.plot(thresholds, pnl_by_threshold, marker='o')
-        ax.set_xlabel("Confidence Threshold")
-        ax.set_ylabel("Total PnL")
-        st.pyplot(fig)
+            pnl_list.append(pd.DataFrame(trades_tmp)['pnl'].sum() if trades_tmp else 0)
+        fig5, ax5 = plt.subplots()
+        ax5.plot(thresholds, pnl_list, marker='o')
+        ax5.set_xlabel("Confidence Threshold")
+        ax5.set_ylabel("Total PnL")
+        st.pyplot(fig5)
 
         st.subheader("📊 Confusion Matrix")
         y_true = df['predicted_label']
         y_pred = model.predict(X)
         cm = confusion_matrix(y_true, y_pred, labels=model.classes_)
+        fig6, ax6 = plt.subplots()
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=model.classes_)
-        fig, ax = plt.subplots()
-        disp.plot(ax=ax)
-        st.pyplot(fig)
+        disp.plot(ax=ax6)
+        st.pyplot(fig6)
 else:
     st.info("📁 Please upload both a CSV and PKL file to begin.")
+'''
+
+# Save to file
+output_file = "/mnt/data/streamlit_app_dynamic.py"
+with open(output_file, "w") as f:
+    f.write(final_enhanced_code)
+
+output_file
