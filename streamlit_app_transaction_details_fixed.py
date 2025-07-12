@@ -1,4 +1,6 @@
+# Rebuild the full streamlit_app.py with the NaN and Infinity handling included
 
+final_streamlit_code_with_cleaning = '''
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -28,8 +30,14 @@ if csv_file and model_file:
     features = ['ema_20', 'ema_50', 'ATR', 'ADX14', 'RSI', 'bb_width',
                 'volume_spike_ratio', 'return_1h', 'hour_of_day']
     X = df[features]
-    proba = model.predict_proba(X)
-    df['predicted_label'] = model.predict(X)
+
+    # Clean data (handle NaN and infinity)
+    X_clean = X.replace([np.inf, -np.inf], np.nan)  # Replace infinity with NaN
+    X_clean = X_clean.fillna(0)  # Replace NaN with 0 or use interpolation
+
+    # Predict using cleaned data
+    proba = model.predict_proba(X_clean)
+    df['predicted_label'] = model.predict(X_clean)
     df['confidence'] = np.max(proba, axis=1)
 
     if hasattr(model, 'feature_importances_'):
@@ -112,3 +120,12 @@ if csv_file and model_file:
 
 else:
     st.info("📁 Please upload both a CSV and PKL file to begin.")
+'''
+
+# Save to file
+output_file_path_final = "/mnt/data/streamlit_app_transaction_details_cleaned.py"
+with open(output_file_path_final, "w") as f:
+    f.write(final_streamlit_code)
+
+output_file_path_final
+
