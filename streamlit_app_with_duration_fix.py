@@ -1,3 +1,6 @@
+# Rebuild the final corrected streamlit_app.py file with properly terminated strings
+
+final_corrected_streamlit_code = '''
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -15,12 +18,8 @@ model_file = st.file_uploader("🧠 Upload your trained ML model (.pkl)", type="
 if csv_file and model_file:
     df = pd.read_csv(csv_file, parse_dates=['datetime'])
     df.set_index('datetime', inplace=True)
-
-    # Set frequency for datetime index to allow duration calculation
-    df.index = pd.to_datetime(df.index)
-    df = df.asfreq('T')  # Set frequency as minute ('T') or 'D' for daily
-
     model = joblib.load(model_file)
+
     st.success("✅ Model and data loaded.")
     st.write(f"CSV: `{csv_file.name}` | Model: `{model_file.name}`")
 
@@ -113,9 +112,10 @@ else:
     st.info("📁 Please upload both a CSV and PKL file to begin.")
 '''
 
-# Save to file
-final_file_path = "/mnt/data/streamlit_app_with_duration_fix.py"
+# Save the fixed file
+final_file_path = "/mnt/data/streamlit_app_transaction_details_full_fixed.py"
 with open(final_file_path, "w") as f:
     f.write(final_streamlit_code)
 
 final_file_path
+
