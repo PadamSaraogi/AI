@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -16,8 +15,12 @@ model_file = st.file_uploader("🧠 Upload your trained ML model (.pkl)", type="
 if csv_file and model_file:
     df = pd.read_csv(csv_file, parse_dates=['datetime'])
     df.set_index('datetime', inplace=True)
-    model = joblib.load(model_file)
 
+    # Set frequency for datetime index to allow duration calculation
+    df.index = pd.to_datetime(df.index)
+    df = df.asfreq('T')  # Set frequency as minute ('T') or 'D' for daily
+
+    model = joblib.load(model_file)
     st.success("✅ Model and data loaded.")
     st.write(f"CSV: `{csv_file.name}` | Model: `{model_file.name}`")
 
@@ -108,3 +111,11 @@ if csv_file and model_file:
 
 else:
     st.info("📁 Please upload both a CSV and PKL file to begin.")
+'''
+
+# Save to file
+final_file_path = "/mnt/data/streamlit_app_with_duration_fix.py"
+with open(final_file_path, "w") as f:
+    f.write(final_streamlit_code)
+
+final_file_path
