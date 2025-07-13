@@ -46,7 +46,7 @@ if csv_file and model_file:
     tabs = st.tabs(["Signals", "Charts", "Backtest", "Stats", "Insights"])
 
     with tabs[0]:
-        st.subheader("📋 Recent Signals (Buy/Sell with Details)")
+        st.subheader("📋 Executed Trades (Buy/Sell Details)")
         trades = run_backtest_simulation(df)
 
         if trades:
@@ -140,5 +140,6 @@ if csv_file and model_file:
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=model.classes_)
         disp.plot(ax=ax6)
         st.pyplot(fig6)
+
 else:
     st.info("📁 Please upload both a CSV and PKL file to begin.")
