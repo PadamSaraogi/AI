@@ -37,7 +37,7 @@ if csv_file and model_file:
 
     recent_signals = df[df['predicted_label'] != 0].tail(100)
     dynamic_threshold = recent_signals['confidence'].quantile(0.25) if not recent_signals.empty else 0.6
-    threshold = st.sidebar.slider("🎚 Confidence Threshold", 0.5, 0.9, float(dynamic_threshold), 0.01)
+    threshold = st.sidebar.slider("🎚 Confidence Threshold", 0.0, 1.0, float(dynamic_threshold), 0.01)
 
     df['expected_pnl'] = df['confidence'] * df['predicted_label'] * df['return_1h']
     df['signal'] = np.where((df['confidence'] >= threshold) & (df['expected_pnl'] > 0), df['predicted_label'], 0)
@@ -103,7 +103,7 @@ if csv_file and model_file:
         st.pyplot(fig4)
 
         st.subheader("📈 Confidence vs PnL Curve")
-        thresholds = np.arange(0.5, 0.91, 0.05)
+        thresholds = np.arange(0.0, 1.01, 0.05)
         pnl_list = []
         for t in thresholds:
             temp_df = df.copy()
