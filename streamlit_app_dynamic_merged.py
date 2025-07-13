@@ -124,21 +124,25 @@ if csv_file and model_file:
             if trades_tmp:
                 tdf = pd.DataFrame(trades_tmp)
                 pnl = tdf['pnl'].sum()
-                pnl_list.append(pnl)
                 sharpe = tdf['pnl'].mean() / tdf['pnl'].std() * np.sqrt(252) if tdf['pnl'].std() > 0 else 0
-                sharpe_list.append(sharpe)
                 dd = tdf['pnl'].cumsum().min()
-                dd_list.append(dd)
-                trade_counts.append(len(tdf))
-                avg_pnls.append(tdf['pnl'].mean())
-                win_rates.append((tdf['pnl'] > 0).mean() * 100)
+                trade_count = len(tdf)
+                avg_pnl = tdf['pnl'].mean()
+                win_rate = (tdf['pnl'] > 0).mean() * 100
             else:
-                pnl_list.append(0)
-                sharpe_list.append(0)
-                dd_list.append(0)
-                trade_counts.append(0)
-                avg_pnls.append(0)
-                win_rates.append(0)
+                pnl = 0
+                sharpe = 0
+                dd = 0
+                trade_count = 0
+                avg_pnl = 0
+                win_rate = 0
+
+            pnl_list.append(pnl)
+            sharpe_list.append(sharpe)
+            dd_list.append(dd)
+            trade_counts.append(trade_count)
+            avg_pnls.append(avg_pnl)
+            win_rates.append(win_rate)
 
         def plot_metric(y, label):
             fig, ax = plt.subplots()
