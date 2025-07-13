@@ -1,77 +1,105 @@
+# Write the verified and updated backtest.py with expected columns for Streamlit dashboard
+from pathlib import Path
 
-import streamlit as st
+code = """
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import joblib
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from backtest import run_backtest_simulation
 
-st.set_page_config(layout="wide")
-st.title("📈 Smart Trading Dashboard")
+def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2.5):
+    trades = []
+    in_trade = False
+    cooldown = 0
+    COOLDOWN_BARS = 2
+    STOP_MULT = 1.0
 
-with st.sidebar:
-    st.header("Configuration")
-    csv_file = st.file_uploader("📂 Upload your indicator CSV file", type="csv")
-    model_file = st.file_uploader("🧠 Upload your trained ML model (.pkl)", type="pkl")
+    for i in range(1, len(df)):
+        if cooldown > 0:
+            cooldown -= 1
+            continue
 
-if csv_file and model_file:
-    df = pd.read_csv(csv_file, parse_dates=['datetime'])
-    df.set_index('datetime', inplace=True)
-    model = joblib.load(model_file)
+        sig = df['signal'].iat[i]
+        price = df['close'].iat[i]
+        atr = df['ATR'].iat[i]
+        adx = df['ADX14'].iat[i]
 
-    st.success("✅ Model and data loaded.")
-    st.write(f"CSV: `{csv_file.name}` | Model: `{model_file.name}`")
+        if not in_trade and sig != 0:
+            entry_price = price
+            entry_sig = sig
+            stop_price = entry_price - STOP_MULT * atr * entry_sig
+            tp_half = entry_price + 1.0 * atr * entry_sig
 
-    features = ['ema_20', 'ema_50', 'ATR', 'ADX14', 'RSI', 'bb_width',
-                'volume_spike_ratio', 'return_1h', 'hour_of_day']
-    X = df[features]
-    proba = model.predict_proba(X)
-    df['predicted_label'] = model.predict(X)
-    df['confidence'] = np.max(proba, axis=1)
+            if adx < 20:
+                target_mult = 2.0
+            elif adx < 30:
+                target_mult = 2.5
+            else:
+                target_mult = adx_target_mult
 
-    if hasattr(model, 'feature_importances_'):
-        st.subheader("🧠 Feature Importance")
-        feat_imp = pd.Series(model.feature_importances_, index=X.columns).sort_values()
-        st.bar_chart(feat_imp)
+            tp_full = entry_price + target_mult * atr * entry_sig
+            trail_price = entry_price
+            in_trade = True
+            entry_idx = i
+            half_closed = False
+            pnl_half = 0.0
+            tp1_price = np.nan
+            continue
 
-    recent_signals = df[df['predicted_label'] != 0].tail(100)
-    dynamic_threshold = recent_signals['confidence'].quantile(0.25) if not recent_signals.empty else 0.6
+        if in_trade:
+            duration = i - entry_idx
+            price_now = price
+            atr_now = atr
 
-    threshold = st.sidebar.slider("🎚 Confidence Threshold", 0.0, 1.0, float(dynamic_threshold), 0.01)
+            if entry_sig > 0:
+                trail_price = max(trail_price, price_now)
+                trailing_stop = trail_price - trail_mult * atr_now
+            else:
+                trail_price = min(trail_price, price_now)
+                trailing_stop = trail_price + trail_mult * atr_now
 
-    df['expected_pnl'] = df['confidence'] * df['predicted_label'] * df['return_1h']
-    df['signal'] = np.where((df['confidence'] >= threshold) & (df['expected_pnl'] > 0), df['predicted_label'], 0)
-    df['position'] = df['signal'].replace(0, np.nan).ffill()
+            if not half_closed:
+                hit_tp1 = (entry_sig > 0 and price_now >= tp_half) or (entry_sig < 0 and price_now <= tp_half)
+                if hit_tp1:
+                    tp1_price = price_now
+                    if entry_sig == 1:
+                        pnl_half = 0.5 * (tp1_price - entry_price)
+                    else:
+                        pnl_half = 0.5 * (entry_price - tp1_price)
+                    half_closed = True
+                    continue
 
-    tabs = st.tabs(["Signals", "Charts", "Backtest", "Stats", "Insights"])
+            hit_exit = (
+                (entry_sig > 0 and (price_now <= stop_price or price_now >= tp_full or price_now <= trailing_stop)) or
+                (entry_sig < 0 and (price_now >= stop_price or price_now <= tp_full or price_now >= trailing_stop)) or
+                duration >= time_limit
+            )
 
-    with tabs[0]:
-        st.subheader("📋 Executed Trades (TP1 + Final Exit Breakdown)")
-        trades = run_backtest_simulation(df)
+            if hit_exit:
+                final_exit_price = price_now
+                if entry_sig == 1:
+                    pnl_full = 0.5 * (final_exit_price - entry_price)
+                else:
+                    pnl_full = 0.5 * (entry_price - final_exit_price)
 
-        if trades:
-            trades_df = pd.DataFrame(trades)
-            trades_df['entry_time'] = pd.to_datetime(trades_df['entry_time'])
-            trades_df['exit_time'] = pd.to_datetime(trades_df['exit_time'])
+                total_pnl = pnl_half + pnl_full if half_closed else pnl_full
 
-            display_cols = trades_df[[
-                'trade_type',
-                'entry_time', 'entry_price',
-                'tp1_exit_price', 'final_exit_price',
-                'pnl_half', 'pnl_final', 'pnl'
-            ]].sort_values(by='entry_time', ascending=False).reset_index(drop=True)
+                trades.append({
+                    'entry_time': df.index[entry_idx],
+                    'exit_time': df.index[i],
+                    'entry_price': entry_price,
+                    'tp1_exit_price': tp1_price,
+                    'final_exit_price': final_exit_price,
+                    'pnl_half': pnl_half,
+                    'pnl_final': pnl_full if half_closed else pnl_full,
+                    'pnl': total_pnl,
+                    'trade_type': 'Buy' if entry_sig == 1 else 'Short Sell'
+                })
 
-            st.dataframe(display_cols.style.format({
-                "entry_price": "{:.2f}",
-                "tp1_exit_price": "{:.2f}",
-                "final_exit_price": "{:.2f}",
-                "pnl_half": "{:+.2f}",
-                "pnl_final": "{:+.2f}",
-                "pnl": "{:+.2f}"
-            }))
-        else:
-            st.info("No trades available yet.")
+                in_trade = False
+                cooldown = COOLDOWN_BARS
 
-else:
-    st.info("📁 Please upload both a CSV and PKL file to begin.")
+    return trades
+"""
+
+path = Path("/mnt/data/backtest.py")
+path.write_text(code)
+path.name
