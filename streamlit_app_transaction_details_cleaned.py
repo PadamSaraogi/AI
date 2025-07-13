@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import plotly.graph_objects as go
 import joblib
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from backtest import run_backtest_simulation
@@ -12,8 +11,8 @@ st.title("📈 Smart Trading Dashboard")
 
 with st.sidebar:
     st.header("Configuration")
-    csv_file = st.file_uploader("📂 Upload Indicator CSV", type="csv")
-    model_file = st.file_uploader("🧠 Upload Trained Model", type="pkl")
+    csv_file = st.file_uploader("📂 Upload your indicator CSV file", type="csv")
+    model_file = st.file_uploader("🧠 Upload your trained ML model (.pkl)", type="pkl")
 
 if csv_file and model_file:
     df = pd.read_csv(csv_file, parse_dates=['datetime'])
@@ -37,6 +36,7 @@ if csv_file and model_file:
 
     recent_signals = df[df['predicted_label'] != 0].tail(100)
     dynamic_threshold = recent_signals['confidence'].quantile(0.25) if not recent_signals.empty else 0.6
+
     threshold = st.sidebar.slider("🎚 Confidence Threshold", 0.0, 1.0, float(dynamic_threshold), 0.01)
 
     df['expected_pnl'] = df['confidence'] * df['predicted_label'] * df['return_1h']
@@ -46,16 +46,37 @@ if csv_file and model_file:
     tabs = st.tabs(["Signals", "Charts", "Backtest", "Stats", "Insights"])
 
     with tabs[0]:
-        st.subheader("📋 Recent Signals")
-        st.dataframe(df[['close', 'signal', 'confidence', 'expected_pnl']].tail(20))
+        st.subheader("📋 Recent Signals (Buy/Sell with Details)")
+        trades = run_backtest_simulation(df)
+
+        if trades:
+            trades_df = pd.DataFrame(trades)
+            trades_df['entry_time'] = pd.to_datetime(trades_df['entry_time'])
+            trades_df['exit_time'] = pd.to_datetime(trades_df['exit_time'])
+            trades_df['trade_type'] = trades_df.apply(
+                lambda row: "Buy" if row['entry_price'] < row['exit_price'] else "Short Sell", axis=1
+            )
+
+            display_cols = trades_df[[
+                'trade_type', 'entry_time', 'entry_price', 'exit_time', 'exit_price', 'pnl'
+            ]].sort_values(by='entry_time', ascending=False).reset_index(drop=True)
+
+            st.dataframe(display_cols.style.format({
+                "entry_price": "{:.2f}",
+                "exit_price": "{:.2f}",
+                "pnl": "{:+.2f}"
+            }))
+        else:
+            st.info("No trades available yet.")
 
     with tabs[1]:
-        st.subheader("📈 Signal Chart (Interactive)")
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df.index, y=df['close'], name='Price', line=dict(color='gray')))
-        fig.add_trace(go.Scatter(x=df[df['signal'] == 1].index, y=df['close'][df['signal'] == 1], mode='markers', name='Buy', marker=dict(color='green', symbol='triangle-up')))
-        fig.add_trace(go.Scatter(x=df[df['signal'] == -1].index, y=df['close'][df['signal'] == -1], mode='markers', name='Sell', marker=dict(color='red', symbol='triangle-down')))
-        st.plotly_chart(fig, use_container_width=True)
+        st.subheader("📈 Signal Chart")
+        fig, ax = plt.subplots(figsize=(12, 4))
+        ax.plot(df.index, df['close'], label='Price', color='gray')
+        ax.plot(df[df['signal'] == 1].index, df['close'][df['signal'] == 1], '^', color='green', label='Buy')
+        ax.plot(df[df['signal'] == -1].index, df['close'][df['signal'] == -1], 'v', color='red', label='Sell')
+        ax.legend()
+        st.pyplot(fig)
 
         df['strategy_return'] = df['signal'].shift(1) * df['close'].pct_change()
         df['cumulative_return'] = (1 + df['strategy_return'].fillna(0)).cumprod()
@@ -67,27 +88,21 @@ if csv_file and model_file:
         st.pyplot(fig2)
 
     with tabs[2]:
-        trades = run_backtest_simulation(df)
-        trades_df = pd.DataFrame(trades)
-
-        if not trades_df.empty:
+        st.subheader("📊 Backtest Results")
+        if trades:
             trades_df['cumulative_pnl'] = trades_df['pnl'].cumsum()
             trades_df['drawdown'] = trades_df['cumulative_pnl'] - trades_df['cumulative_pnl'].cummax()
             trades_df['duration'] = (pd.to_datetime(trades_df['exit_time']) - pd.to_datetime(trades_df['entry_time'])).dt.total_seconds() / 60
 
-            st.subheader("📈 Equity Curve")
             fig3, ax3 = plt.subplots(figsize=(12, 3))
             ax3.plot(trades_df['exit_time'], trades_df['cumulative_pnl'], color='blue')
             st.pyplot(fig3)
 
-            st.download_button("📥 Download Trades", trades_df.to_csv().encode(), "trades.csv", "text/csv")
-
-            trades_df['date'] = pd.to_datetime(trades_df['exit_time']).dt.date
-            daily_pnl = trades_df.groupby('date')['pnl'].sum().reset_index()
-            st.download_button("📆 Download Daily PnL", daily_pnl.to_csv().encode(), "daily_pnl.csv")
+            st.download_button("📥 Download Trades", trades_df.to_csv(index=False).encode(), "trades.csv", "text/csv")
 
     with tabs[3]:
-        if not trades_df.empty:
+        st.subheader("📈 Stats")
+        if trades:
             sharpe = trades_df['pnl'].mean() / trades_df['pnl'].std() * np.sqrt(252) if trades_df['pnl'].std() > 0 else 0
             col1, col2, col3, col4, col5 = st.columns(5)
             col1.metric("Total PnL", f"{trades_df['pnl'].sum():.2f}")
@@ -117,7 +132,7 @@ if csv_file and model_file:
         ax5.set_ylabel("Total PnL")
         st.pyplot(fig5)
 
-        st.subheader("📊 Confusion Matrix")
+        st.subheader("📉 Confusion Matrix")
         y_true = df['predicted_label']
         y_pred = model.predict(X)
         cm = confusion_matrix(y_true, y_pred, labels=model.classes_)
