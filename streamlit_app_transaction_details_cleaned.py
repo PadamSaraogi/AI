@@ -1,145 +1,92 @@
-import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import joblib
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from backtest import run_backtest_simulation
 
-st.set_page_config(layout="wide")
-st.title("📈 Smart Trading Dashboard")
+def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2.5):
+    trades = []
+    in_trade = False
+    cooldown = 0
+    COOLDOWN_BARS = 2
+    STOP_MULT = 1.0
 
-with st.sidebar:
-    st.header("Configuration")
-    csv_file = st.file_uploader("📂 Upload your indicator CSV file", type="csv")
-    model_file = st.file_uploader("🧠 Upload your trained ML model (.pkl)", type="pkl")
+    for i in range(1, len(df)):
+        if cooldown > 0:
+            cooldown -= 1
+            continue
 
-if csv_file and model_file:
-    df = pd.read_csv(csv_file, parse_dates=['datetime'])
-    df.set_index('datetime', inplace=True)
-    model = joblib.load(model_file)
+        sig = df['signal'].iat[i]
+        price = df['close'].iat[i]
+        atr = df['ATR'].iat[i]
+        adx = df['ADX14'].iat[i]
 
-    st.success("✅ Model and data loaded.")
-    st.write(f"CSV: `{csv_file.name}` | Model: `{model_file.name}`")
+        if not in_trade and sig != 0:
+            entry_price = price
+            entry_sig = sig  # +1 for long, -1 for short
+            stop_price = entry_price - STOP_MULT * atr * entry_sig
+            tp_half = entry_price + 1.0 * atr * entry_sig
 
-    features = ['ema_20', 'ema_50', 'ATR', 'ADX14', 'RSI', 'bb_width',
-                'volume_spike_ratio', 'return_1h', 'hour_of_day']
-    X = df[features]
-    proba = model.predict_proba(X)
-    df['predicted_label'] = model.predict(X)
-    df['confidence'] = np.max(proba, axis=1)
+            if adx < 20:
+                target_mult = 2.0
+            elif adx < 30:
+                target_mult = 2.5
+            else:
+                target_mult = adx_target_mult
 
-    if hasattr(model, 'feature_importances_'):
-        st.subheader("🧠 Feature Importance")
-        feat_imp = pd.Series(model.feature_importances_, index=X.columns).sort_values()
-        st.bar_chart(feat_imp)
+            tp_full = entry_price + target_mult * atr * entry_sig
+            trail_price = entry_price
+            in_trade = True
+            entry_idx = i
+            half_closed = False
+            pnl_half = 0.0  # initialize
 
-    recent_signals = df[df['predicted_label'] != 0].tail(100)
-    dynamic_threshold = recent_signals['confidence'].quantile(0.25) if not recent_signals.empty else 0.6
+            continue
 
-    threshold = st.sidebar.slider("🎚 Confidence Threshold", 0.0, 1.0, float(dynamic_threshold), 0.01)
+        if in_trade:
+            duration = i - entry_idx
+            price_now = price
+            atr_now = atr
 
-    df['expected_pnl'] = df['confidence'] * df['predicted_label'] * df['return_1h']
-    df['signal'] = np.where((df['confidence'] >= threshold) & (df['expected_pnl'] > 0), df['predicted_label'], 0)
-    df['position'] = df['signal'].replace(0, np.nan).ffill()
+            if entry_sig > 0:
+                trail_price = max(trail_price, price_now)
+                trailing_stop = trail_price - trail_mult * atr_now
+            else:
+                trail_price = min(trail_price, price_now)
+                trailing_stop = trail_price + trail_mult * atr_now
 
-    tabs = st.tabs(["Signals", "Charts", "Backtest", "Stats", "Insights"])
+            # First Half Exit (TP1)
+            if not half_closed:
+                hit_tp1 = (entry_sig > 0 and price_now >= tp_half) or (entry_sig < 0 and price_now <= tp_half)
+                if hit_tp1:
+                    if entry_sig == 1:
+                        pnl_half = 0.5 * (price_now - entry_price)
+                    else:
+                        pnl_half = 0.5 * (entry_price - price_now)
+                    half_closed = True
+                    continue
 
-    with tabs[0]:
-        st.subheader("📋 Executed Trades (Buy/Sell Details)")
-        trades = run_backtest_simulation(df)
-
-        if trades:
-            trades_df = pd.DataFrame(trades)
-            trades_df['entry_time'] = pd.to_datetime(trades_df['entry_time'])
-            trades_df['exit_time'] = pd.to_datetime(trades_df['exit_time'])
-            trades_df['trade_type'] = trades_df.apply(
-                lambda row: "Buy" if row['entry_price'] < row['exit_price'] else "Short Sell", axis=1
+            # Final Exit Conditions
+            hit_exit = (
+                (entry_sig > 0 and (price_now <= stop_price or price_now >= tp_full or price_now <= trailing_stop)) or
+                (entry_sig < 0 and (price_now >= stop_price or price_now <= tp_full or price_now >= trailing_stop)) or
+                duration >= time_limit
             )
 
-            display_cols = trades_df[[
-                'trade_type', 'entry_time', 'entry_price', 'exit_time', 'exit_price', 'pnl'
-            ]].sort_values(by='entry_time', ascending=False).reset_index(drop=True)
+            if hit_exit:
+                if entry_sig == 1:
+                    pnl_full = 0.5 * (price_now - entry_price)
+                else:
+                    pnl_full = 0.5 * (entry_price - price_now)
 
-            st.dataframe(display_cols.style.format({
-                "entry_price": "{:.2f}",
-                "exit_price": "{:.2f}",
-                "pnl": "{:+.2f}"
-            }))
-        else:
-            st.info("No trades available yet.")
+                total_pnl = pnl_half + pnl_full if half_closed else pnl_full
 
-    with tabs[1]:
-        st.subheader("📈 Signal Chart")
-        fig, ax = plt.subplots(figsize=(12, 4))
-        ax.plot(df.index, df['close'], label='Price', color='gray')
-        ax.plot(df[df['signal'] == 1].index, df['close'][df['signal'] == 1], '^', color='green', label='Buy')
-        ax.plot(df[df['signal'] == -1].index, df['close'][df['signal'] == -1], 'v', color='red', label='Sell')
-        ax.legend()
-        st.pyplot(fig)
+                trades.append({
+                    'entry_time': df.index[entry_idx],
+                    'exit_time': df.index[i],
+                    'entry_price': entry_price,
+                    'exit_price': price_now,
+                    'pnl': total_pnl
+                })
 
-        df['strategy_return'] = df['signal'].shift(1) * df['close'].pct_change()
-        df['cumulative_return'] = (1 + df['strategy_return'].fillna(0)).cumprod()
-        st.subheader("💹 Cumulative Return vs Price")
-        fig2, ax2 = plt.subplots(figsize=(12, 4))
-        ax2.plot(df.index, df['close'], label='Price', alpha=0.7)
-        ax2b = ax2.twinx()
-        ax2b.plot(df.index, df['cumulative_return'], label='Cumulative Return', color='green')
-        st.pyplot(fig2)
+                in_trade = False
+                cooldown = COOLDOWN_BARS
 
-    with tabs[2]:
-        st.subheader("📊 Backtest Results")
-        if trades:
-            trades_df['cumulative_pnl'] = trades_df['pnl'].cumsum()
-            trades_df['drawdown'] = trades_df['cumulative_pnl'] - trades_df['cumulative_pnl'].cummax()
-            trades_df['duration'] = (pd.to_datetime(trades_df['exit_time']) - pd.to_datetime(trades_df['entry_time'])).dt.total_seconds() / 60
-
-            fig3, ax3 = plt.subplots(figsize=(12, 3))
-            ax3.plot(trades_df['exit_time'], trades_df['cumulative_pnl'], color='blue')
-            st.pyplot(fig3)
-
-            st.download_button("📥 Download Trades", trades_df.to_csv(index=False).encode(), "trades.csv", "text/csv")
-
-    with tabs[3]:
-        st.subheader("📈 Stats")
-        if trades:
-            sharpe = trades_df['pnl'].mean() / trades_df['pnl'].std() * np.sqrt(252) if trades_df['pnl'].std() > 0 else 0
-            col1, col2, col3, col4, col5 = st.columns(5)
-            col1.metric("Total PnL", f"{trades_df['pnl'].sum():.2f}")
-            col2.metric("Win Rate", f"{(trades_df['pnl'] > 0).mean() * 100:.1f}%")
-            col3.metric("Sharpe Ratio", f"{sharpe:.2f}")
-            col4.metric("Trades", f"{len(trades_df)}")
-            col5.metric("Avg Hold (min)", f"{trades_df['duration'].mean():.1f}")
-
-    with tabs[4]:
-        st.subheader("📊 PnL Histogram")
-        fig4, ax4 = plt.subplots()
-        trades_df['pnl'].hist(bins=30, ax=ax4)
-        st.pyplot(fig4)
-
-        st.subheader("📈 Confidence vs PnL Curve")
-        thresholds = np.arange(0.0, 1.01, 0.05)
-        pnl_list = []
-        for t in thresholds:
-            temp_df = df.copy()
-            temp_df['signal'] = np.where((temp_df['confidence'] >= t) & (temp_df['expected_pnl'] > 0), temp_df['predicted_label'], 0)
-            temp_df['position'] = temp_df['signal'].replace(0, np.nan).ffill()
-            trades_tmp = run_backtest_simulation(temp_df)
-            pnl_list.append(pd.DataFrame(trades_tmp)['pnl'].sum() if trades_tmp else 0)
-        fig5, ax5 = plt.subplots()
-        ax5.plot(thresholds, pnl_list, marker='o')
-        ax5.set_xlabel("Confidence Threshold")
-        ax5.set_ylabel("Total PnL")
-        st.pyplot(fig5)
-
-        st.subheader("📉 Confusion Matrix")
-        y_true = df['predicted_label']
-        y_pred = model.predict(X)
-        cm = confusion_matrix(y_true, y_pred, labels=model.classes_)
-        fig6, ax6 = plt.subplots()
-        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=model.classes_)
-        disp.plot(ax=ax6)
-        st.pyplot(fig6)
-
-else:
-    st.info("📁 Please upload both a CSV and PKL file to begin.")
+    return trades
