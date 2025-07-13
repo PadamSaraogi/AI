@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -55,11 +54,8 @@ if csv_file and model_file:
             trades_df['exit_time'] = pd.to_datetime(trades_df['exit_time'])
 
             display_cols = trades_df[[
-                'trade_type',
-                'entry_time', 'entry_price',
-                'tp1_exit_price', 'final_exit_price',
-                'pnl_half', 'pnl_final', 'pnl'
-            ]].sort_values(by='entry_time', ascending=False).reset_index(drop=True)
+                'trade_type', 'entry_time', 'entry_price', 'tp1_exit_price',
+                'final_exit_price', 'pnl_half', 'pnl_final', 'pnl']].sort_values(by='entry_time', ascending=False).reset_index(drop=True)
 
             st.dataframe(display_cols.style.format({
                 "entry_price": "{:.2f}",
@@ -95,7 +91,7 @@ if csv_file and model_file:
         if trades:
             trades_df['cumulative_pnl'] = trades_df['pnl'].cumsum()
             trades_df['drawdown'] = trades_df['cumulative_pnl'] - trades_df['cumulative_pnl'].cummax()
-            trades_df['duration'] = (pd.to_datetime(trades_df['exit_time']) - pd.to_datetime(trades_df['entry_time'])).dt.total_seconds() / 60
+            trades_df['duration'] = (trades_df['exit_time'] - trades_df['entry_time']).dt.total_seconds() / 60
 
             fig3, ax3 = plt.subplots(figsize=(12, 3))
             ax3.plot(trades_df['exit_time'], trades_df['cumulative_pnl'], color='blue')
@@ -115,25 +111,49 @@ if csv_file and model_file:
             col5.metric("Avg Hold (min)", f"{trades_df['duration'].mean():.1f}")
 
     with tabs[4]:
-        st.subheader("📊 PnL Histogram")
-        fig4, ax4 = plt.subplots()
-        trades_df['pnl'].hist(bins=30, ax=ax4)
-        st.pyplot(fig4)
+        st.subheader("📊 Additional Insights")
 
-        st.subheader("📈 Confidence vs PnL Curve")
         thresholds = np.arange(0.0, 1.01, 0.05)
-        pnl_list = []
+        pnl_list, sharpe_list, dd_list, trade_counts, avg_pnls, win_rates = [], [], [], [], [], []
+
         for t in thresholds:
             temp_df = df.copy()
             temp_df['signal'] = np.where((temp_df['confidence'] >= t) & (temp_df['expected_pnl'] > 0), temp_df['predicted_label'], 0)
             temp_df['position'] = temp_df['signal'].replace(0, np.nan).ffill()
             trades_tmp = run_backtest_simulation(temp_df)
-            pnl_list.append(pd.DataFrame(trades_tmp)['pnl'].sum() if trades_tmp else 0)
-        fig5, ax5 = plt.subplots()
-        ax5.plot(thresholds, pnl_list, marker='o')
-        ax5.set_xlabel("Confidence Threshold")
-        ax5.set_ylabel("Total PnL")
-        st.pyplot(fig5)
+            if trades_tmp:
+                tdf = pd.DataFrame(trades_tmp)
+                pnl = tdf['pnl'].sum()
+                pnl_list.append(pnl)
+                sharpe = tdf['pnl'].mean() / tdf['pnl'].std() * np.sqrt(252) if tdf['pnl'].std() > 0 else 0
+                sharpe_list.append(sharpe)
+                dd = tdf['pnl'].cumsum().min()
+                dd_list.append(dd)
+                trade_counts.append(len(tdf))
+                avg_pnls.append(tdf['pnl'].mean())
+                win_rates.append((tdf['pnl'] > 0).mean() * 100)
+            else:
+                pnl_list.append(0)
+                sharpe_list.append(0)
+                dd_list.append(0)
+                trade_counts.append(0)
+                avg_pnls.append(0)
+                win_rates.append(0)
+
+        def plot_metric(y, label):
+            fig, ax = plt.subplots()
+            ax.plot(thresholds, y, marker='o')
+            ax.set_xlabel("Confidence Threshold")
+            ax.set_ylabel(label)
+            ax.set_title(f"{label} vs Threshold")
+            st.pyplot(fig)
+
+        plot_metric(pnl_list, "Total PnL")
+        plot_metric(sharpe_list, "Sharpe Ratio")
+        plot_metric(dd_list, "Max Drawdown")
+        plot_metric(trade_counts, "Trade Count")
+        plot_metric(avg_pnls, "Average PnL per Trade")
+        plot_metric(win_rates, "Win Rate (%)")
 
         st.subheader("📉 Confusion Matrix")
         y_true = df['predicted_label']
@@ -143,6 +163,5 @@ if csv_file and model_file:
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=model.classes_)
         disp.plot(ax=ax6)
         st.pyplot(fig6)
-
 else:
     st.info("📁 Please upload both a CSV and PKL file to begin.")
