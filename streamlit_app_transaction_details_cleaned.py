@@ -1,8 +1,8 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 import joblib
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from backtest import run_backtest_simulation
@@ -10,8 +10,10 @@ from backtest import run_backtest_simulation
 st.set_page_config(layout="wide")
 st.title("📈 Smart Trading Dashboard")
 
-csv_file = st.file_uploader("📂 Upload your indicator CSV file", type="csv")
-model_file = st.file_uploader("🧠 Upload your trained ML model (.pkl)", type="pkl")
+with st.sidebar:
+    st.header("Configuration")
+    csv_file = st.file_uploader("📂 Upload Indicator CSV", type="csv")
+    model_file = st.file_uploader("🧠 Upload Trained Model", type="pkl")
 
 if csv_file and model_file:
     df = pd.read_csv(csv_file, parse_dates=['datetime'])
@@ -33,17 +35,10 @@ if csv_file and model_file:
         feat_imp = pd.Series(model.feature_importances_, index=X.columns).sort_values()
         st.bar_chart(feat_imp)
 
-    # Dynamic Threshold from past 100 signals
     recent_signals = df[df['predicted_label'] != 0].tail(100)
-    if not recent_signals.empty:
-        dynamic_threshold = recent_signals[recent_signals['predicted_label'] != 0]['confidence'].quantile(0.25)
-        st.metric("🧠 Dynamic Threshold (Q25 Conf)", f"{dynamic_threshold:.2f}")
-    else:
-        dynamic_threshold = 0.6
+    dynamic_threshold = recent_signals['confidence'].quantile(0.25) if not recent_signals.empty else 0.6
+    threshold = st.sidebar.slider("🎚 Confidence Threshold", 0.5, 0.9, float(dynamic_threshold), 0.01)
 
-    threshold = st.slider("🎚 Confidence Threshold", 0.5, 0.9, dynamic_threshold, 0.01)
-
-    # Expected value-based signal filtering
     df['expected_pnl'] = df['confidence'] * df['predicted_label'] * df['return_1h']
     df['signal'] = np.where((df['confidence'] >= threshold) & (df['expected_pnl'] > 0), df['predicted_label'], 0)
     df['position'] = df['signal'].replace(0, np.nan).ffill()
@@ -55,13 +50,12 @@ if csv_file and model_file:
         st.dataframe(df[['close', 'signal', 'confidence', 'expected_pnl']].tail(20))
 
     with tabs[1]:
-        st.subheader("📈 Signal Chart")
-        fig, ax = plt.subplots(figsize=(12, 4))
-        ax.plot(df.index, df['close'], label='Price', color='gray')
-        ax.plot(df[df['signal'] == 1].index, df['close'][df['signal'] == 1], '^', color='green', label='Buy')
-        ax.plot(df[df['signal'] == -1].index, df['close'][df['signal'] == -1], 'v', color='red', label='Sell')
-        ax.legend()
-        st.pyplot(fig)
+        st.subheader("📈 Signal Chart (Interactive)")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df.index, y=df['close'], name='Price', line=dict(color='gray')))
+        fig.add_trace(go.Scatter(x=df[df['signal'] == 1].index, y=df['close'][df['signal'] == 1], mode='markers', name='Buy', marker=dict(color='green', symbol='triangle-up')))
+        fig.add_trace(go.Scatter(x=df[df['signal'] == -1].index, y=df['close'][df['signal'] == -1], mode='markers', name='Sell', marker=dict(color='red', symbol='triangle-down')))
+        st.plotly_chart(fig, use_container_width=True)
 
         df['strategy_return'] = df['signal'].shift(1) * df['close'].pct_change()
         df['cumulative_return'] = (1 + df['strategy_return'].fillna(0)).cumprod()
@@ -87,6 +81,10 @@ if csv_file and model_file:
             st.pyplot(fig3)
 
             st.download_button("📥 Download Trades", trades_df.to_csv().encode(), "trades.csv", "text/csv")
+
+            trades_df['date'] = pd.to_datetime(trades_df['exit_time']).dt.date
+            daily_pnl = trades_df.groupby('date')['pnl'].sum().reset_index()
+            st.download_button("📆 Download Daily PnL", daily_pnl.to_csv().encode(), "daily_pnl.csv")
 
     with tabs[3]:
         if not trades_df.empty:
