@@ -20,7 +20,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
 
         if not in_trade and sig != 0:
             entry_price = price
-            entry_sig = sig
+            entry_sig = sig  # +1 for long, -1 for short
             stop_price = entry_price - STOP_MULT * atr * entry_sig
             tp_half = entry_price + 1.0 * atr * entry_sig
 
@@ -36,8 +36,8 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
             in_trade = True
             entry_idx = i
             half_closed = False
-            pnl_half = 0.0
-            tp1_price = np.nan
+            pnl_half = 0.0  # initialize
+
             continue
 
         if in_trade:
@@ -52,19 +52,18 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                 trail_price = min(trail_price, price_now)
                 trailing_stop = trail_price + trail_mult * atr_now
 
-            # TP1 logic
+            # First Half Exit (TP1)
             if not half_closed:
                 hit_tp1 = (entry_sig > 0 and price_now >= tp_half) or (entry_sig < 0 and price_now <= tp_half)
                 if hit_tp1:
-                    tp1_price = price_now
                     if entry_sig == 1:
-                        pnl_half = 0.5 * (tp1_price - entry_price)
+                        pnl_half = 0.5 * (price_now - entry_price)
                     else:
-                        pnl_half = 0.5 * (entry_price - tp1_price)
+                        pnl_half = 0.5 * (entry_price - price_now)
                     half_closed = True
                     continue
 
-            # Final exit logic
+            # Final Exit Conditions
             hit_exit = (
                 (entry_sig > 0 and (price_now <= stop_price or price_now >= tp_full or price_now <= trailing_stop)) or
                 (entry_sig < 0 and (price_now >= stop_price or price_now <= tp_full or price_now >= trailing_stop)) or
@@ -72,11 +71,10 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
             )
 
             if hit_exit:
-                final_exit_price = price_now
                 if entry_sig == 1:
-                    pnl_full = 0.5 * (final_exit_price - entry_price)
+                    pnl_full = 0.5 * (price_now - entry_price)
                 else:
-                    pnl_full = 0.5 * (entry_price - final_exit_price)
+                    pnl_full = 0.5 * (entry_price - price_now)
 
                 total_pnl = pnl_half + pnl_full if half_closed else pnl_full
 
@@ -84,10 +82,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                     'entry_time': df.index[entry_idx],
                     'exit_time': df.index[i],
                     'entry_price': entry_price,
-                    'tp1_exit_price': tp1_price,
-                    'final_exit_price': final_exit_price,
-                    'pnl_half': pnl_half,
-                    'pnl_final': pnl_full if half_closed else pnl_full,
+                    'exit_price': price_now,
                     'pnl': total_pnl
                 })
 
