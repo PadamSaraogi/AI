@@ -1,3 +1,4 @@
+
 import pandas as pd
 import numpy as np
 
@@ -7,7 +8,6 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
     cooldown = 0
     COOLDOWN_BARS = 2
     STOP_MULT = 1.0
-    entry_sig = 0
 
     for i in range(1, len(df)):
         if cooldown > 0:
@@ -37,6 +37,8 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
             in_trade = True
             entry_idx = i
             half_closed = False
+            pnl_half = 0.0
+            tp1_price = np.nan
             continue
 
         if in_trade:
@@ -52,33 +54,43 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                 trailing_stop = trail_price + trail_mult * atr_now
 
             if not half_closed:
-                if (entry_sig > 0 and price_now >= tp_half) or (entry_sig < 0 and price_now <= tp_half):
-                    pnl_half = 0.5 * (price_now - entry_price) * entry_sig
-                    trades.append({
-                        'entry_time': df.index[entry_idx],
-                        'exit_time': df.index[i],
-                        'entry_price': entry_price,
-                        'exit_price': price_now,
-                        'pnl': pnl_half
-                    })
+                hit_tp1 = (entry_sig > 0 and price_now >= tp_half) or (entry_sig < 0 and price_now <= tp_half)
+                if hit_tp1:
+                    tp1_price = price_now
+                    if entry_sig == 1:
+                        pnl_half = 0.5 * (tp1_price - entry_price)
+                    else:
+                        pnl_half = 0.5 * (entry_price - tp1_price)
                     half_closed = True
                     continue
 
-            should_exit = (
+            hit_exit = (
                 (entry_sig > 0 and (price_now <= stop_price or price_now >= tp_full or price_now <= trailing_stop)) or
                 (entry_sig < 0 and (price_now >= stop_price or price_now <= tp_full or price_now >= trailing_stop)) or
                 duration >= time_limit
             )
 
-            if should_exit:
-                pnl_full = 0.5 * (price_now - entry_price) * entry_sig
+            if hit_exit:
+                final_exit_price = price_now
+                if entry_sig == 1:
+                    pnl_full = 0.5 * (final_exit_price - entry_price)
+                else:
+                    pnl_full = 0.5 * (entry_price - final_exit_price)
+
+                total_pnl = pnl_half + pnl_full if half_closed else pnl_full
+
                 trades.append({
                     'entry_time': df.index[entry_idx],
                     'exit_time': df.index[i],
                     'entry_price': entry_price,
-                    'exit_price': price_now,
-                    'pnl': pnl_full
+                    'tp1_exit_price': tp1_price,
+                    'final_exit_price': final_exit_price,
+                    'pnl_half': pnl_half,
+                    'pnl_final': pnl_full if half_closed else pnl_full,
+                    'pnl': total_pnl,
+                    'trade_type': 'Buy' if entry_sig == 1 else 'Short Sell'
                 })
+
                 in_trade = False
                 cooldown = COOLDOWN_BARS
 
