@@ -14,6 +14,11 @@ with st.sidebar:
     csv_file = st.file_uploader("📂 Upload your indicator CSV file", type="csv")
     model_file = st.file_uploader("🧠 Upload your trained ML model (.pkl)", type="pkl")
 
+    st.header("Brokerage Settings")
+    brokerage_pct = st.number_input("Brokerage % per side", value=0.0025, step=0.0001)
+    demat_fee = st.number_input("Demat Fee per sell", value=20.0)
+    gst_rate = st.number_input("GST %", value=18.0)
+
 if csv_file and model_file:
     df = pd.read_csv(csv_file, parse_dates=['datetime'])
     df.set_index('datetime', inplace=True)
@@ -53,25 +58,31 @@ if csv_file and model_file:
             trades_df['entry_time'] = pd.to_datetime(trades_df['entry_time'])
             trades_df['exit_time'] = pd.to_datetime(trades_df['exit_time'])
 
+            # Brokerage and Fees
+            trades_df['brokerage'] = brokerage_pct * (trades_df['entry_price'] + trades_df['final_exit_price'])
+            trades_df['gst'] = (gst_rate / 100.0) * trades_df['brokerage']
+            trades_df['demat_fee'] = demat_fee
+            trades_df['fees'] = trades_df['brokerage'] + trades_df['gst'] + trades_df['demat_fee']
+            trades_df['net_pnl'] = trades_df['pnl'] - trades_df['fees']
+
             display_cols = trades_df[[
                 'trade_type', 'entry_time', 'entry_price', 'tp1_exit_price',
-                'final_exit_price', 'pnl_half', 'pnl_final', 'pnl']].sort_values(by='entry_time', ascending=False).reset_index(drop=True)
+                'final_exit_price', 'pnl', 'fees', 'net_pnl']].sort_values(by='entry_time', ascending=False).reset_index(drop=True)
 
             st.dataframe(display_cols.style.format({
                 "entry_price": "{:.2f}",
                 "tp1_exit_price": "{:.2f}",
                 "final_exit_price": "{:.2f}",
-                "pnl_half": "{:+.2f}",
-                "pnl_final": "{:+.2f}",
-                "pnl": "{:+.2f}"
+                "pnl": "{:+.2f}",
+                "fees": "{:.2f}",
+                "net_pnl": "{:+.2f}"
             }))
 
-            # Add time-based breakdown
             trades_df['month'] = trades_df['entry_time'].dt.to_period('M')
-            monthly_pnl = trades_df.groupby('month')['pnl'].sum()
+            monthly_pnl = trades_df.groupby('month')['net_pnl'].sum()
             monthly_count = trades_df.groupby('month').size()
 
-            st.subheader("📅 Monthly PnL Breakdown")
+            st.subheader("📅 Monthly Net PnL Breakdown")
             st.bar_chart(monthly_pnl)
 
             st.subheader("📊 Monthly Trade Count")
@@ -80,5 +91,15 @@ if csv_file and model_file:
         else:
             st.info("No trades available yet.")
 
+    with tabs[3]:
+        st.subheader("📈 Stats")
+        if trades:
+            sharpe = trades_df['net_pnl'].mean() / trades_df['net_pnl'].std() * np.sqrt(252) if trades_df['net_pnl'].std() > 0 else 0
+            col1, col2, col3, col4, col5 = st.columns(5)
+            col1.metric("Gross PnL", f"{trades_df['pnl'].sum():.2f}")
+            col2.metric("Net PnL", f"{trades_df['net_pnl'].sum():.2f}")
+            col3.metric("Total Fees", f"{trades_df['fees'].sum():.2f}")
+            col4.metric("Sharpe Ratio", f"{sharpe:.2f}")
+            col5.metric("Trades", f"{len(trades_df)}")
 else:
     st.info("📁 Please upload both a CSV and PKL file to begin.")
