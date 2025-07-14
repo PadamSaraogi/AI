@@ -14,10 +14,8 @@ with st.sidebar:
     csv_file = st.file_uploader("📂 Upload your indicator CSV file", type="csv")
     model_file = st.file_uploader("🧠 Upload your trained ML model (.pkl)", type="pkl")
 
-    st.header("Brokerage Settings")
-    brokerage_pct = st.number_input("Brokerage % per side", value=0.0025, step=0.0001)
-    demat_fee = st.number_input("Demat Fee per sell", value=20.0)
-    gst_rate = st.number_input("GST %", value=18.0)
+    st.header("Fee Settings")
+    trade_type = st.radio("Trade Type", ["Intraday", "Delivery"])
 
 if csv_file and model_file:
     df = pd.read_csv(csv_file, parse_dates=['datetime'])
@@ -58,11 +56,29 @@ if csv_file and model_file:
             trades_df['entry_time'] = pd.to_datetime(trades_df['entry_time'])
             trades_df['exit_time'] = pd.to_datetime(trades_df['exit_time'])
 
-            # Brokerage and Fees
-            trades_df['brokerage'] = brokerage_pct * (trades_df['entry_price'] + trades_df['final_exit_price'])
-            trades_df['gst'] = (gst_rate / 100.0) * trades_df['brokerage']
-            trades_df['demat_fee'] = demat_fee
-            trades_df['fees'] = trades_df['brokerage'] + trades_df['gst'] + trades_df['demat_fee']
+            # Apply ICICI Prime 299 Fee Structure
+            entry_val = trades_df['entry_price']
+            exit_val = trades_df['final_exit_price']
+
+            if trade_type == "Intraday":
+                # Brokerage 0.025% per side
+                brokerage = 0.00025 * (entry_val + exit_val)
+                stt = 0.00025 * exit_val
+                exchange = 0.0000325 * (entry_val + exit_val)
+                sebi = 0.000001 * (entry_val + exit_val)
+                stamp = 0.0003 * entry_val
+                gst = 0.18 * (brokerage + exchange)
+                demat = 0
+            else:  # Delivery
+                brokerage = 0.0025 * (entry_val + exit_val)
+                stt = 0.001 * (entry_val + exit_val)
+                exchange = 0.0000325 * (entry_val + exit_val)
+                sebi = 0.000001 * (entry_val + exit_val)
+                stamp = 0.00015 * entry_val
+                gst = 0.18 * (brokerage + exchange)
+                demat = 23.60
+
+            trades_df['fees'] = brokerage + stt + exchange + sebi + stamp + gst + demat
             trades_df['net_pnl'] = trades_df['pnl'] - trades_df['fees']
 
             display_cols = trades_df[[
