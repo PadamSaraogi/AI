@@ -68,6 +68,10 @@ if csv_file and model_file:
             trades_df['fees'] = brokerage + stt + exchange + sebi + stamp + gst + demat
             trades_df['net_pnl'] = trades_df['pnl'] - trades_df['fees']
 
+            trades_df['month'] = trades_df['entry_time'].dt.to_period('M')
+            monthly_pnl = trades_df.groupby('month')['net_pnl'].sum()
+            monthly_count = trades_df.groupby('month').size()
+
             display_cols = trades_df[[
                 'trade_type', 'entry_time', 'entry_price', 'tp1_exit_price',
                 'final_exit_price', 'pnl', 'fees', 'net_pnl']].sort_values(by='entry_time', ascending=False).reset_index(drop=True)
@@ -81,28 +85,60 @@ if csv_file and model_file:
                 "net_pnl": "{:+.2f}"
             }))
 
-            trades_df['month'] = trades_df['entry_time'].dt.to_period('M')
-            monthly_pnl = trades_df.groupby('month')['net_pnl'].sum()
-            monthly_count = trades_df.groupby('month').size()
-
             st.subheader("📅 Monthly Net PnL Breakdown")
             st.bar_chart(monthly_pnl)
 
             st.subheader("📊 Monthly Trade Count")
             st.bar_chart(monthly_count)
 
-        else:
-            st.info("No trades available yet.")
+            with tabs[1]:
+                st.subheader("📈 Signal Chart")
+                fig, ax = plt.subplots(figsize=(12, 4))
+                ax.plot(df.index, df['close'], label='Price', color='gray')
+                ax.plot(df[df['signal'] == 1].index, df['close'][df['signal'] == 1], '^', color='green', label='Buy')
+                ax.plot(df[df['signal'] == -1].index, df['close'][df['signal'] == -1], 'v', color='red', label='Sell')
+                ax.legend()
+                st.pyplot(fig)
+
+                df['strategy_return'] = df['signal'].shift(1) * df['close'].pct_change()
+                df['cumulative_return'] = (1 + df['strategy_return'].fillna(0)).cumprod()
+                st.subheader("💹 Cumulative Return vs Price")
+                fig2, ax2 = plt.subplots(figsize=(12, 4))
+                ax2.plot(df.index, df['close'], label='Price', alpha=0.7)
+                ax2b = ax2.twinx()
+                ax2b.plot(df.index, df['cumulative_return'], label='Cumulative Return', color='green')
+                st.pyplot(fig2)
+
+            with tabs[2]:
+                st.subheader("📊 Backtest Results")
+                trades_df['cumulative_pnl'] = trades_df['net_pnl'].cumsum()
+                trades_df['drawdown'] = trades_df['cumulative_pnl'] - trades_df['cumulative_pnl'].cummax()
+                trades_df['duration'] = (trades_df['exit_time'] - trades_df['entry_time']).dt.total_seconds() / 60
+
+                fig3, ax3 = plt.subplots(figsize=(12, 3))
+                ax3.plot(trades_df['exit_time'], trades_df['cumulative_pnl'], color='blue')
+                st.pyplot(fig3)
+
+                st.download_button("📥 Download Trades", trades_df.to_csv(index=False).encode(), "trades.csv", "text/csv")
+
+            with tabs[4]:
+                st.subheader("📉 Confusion Matrix")
+                y_true = df['predicted_label']
+                y_pred = model.predict(X)
+                cm = confusion_matrix(y_true, y_pred, labels=model.classes_)
+                fig6, ax6 = plt.subplots()
+                disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=model.classes_)
+                disp.plot(ax=ax6)
+                st.pyplot(fig6)
 
     with tabs[3]:
         st.subheader("📈 Stats")
-        if trades:
-            sharpe = trades_df['net_pnl'].mean() / trades_df['net_pnl'].std() * np.sqrt(252) if trades_df['net_pnl'].std() > 0 else 0
-            col1, col2, col3, col4, col5 = st.columns(5)
-            col1.metric("Gross PnL", f"{trades_df['pnl'].sum():.2f}")
-            col2.metric("Net PnL", f"{trades_df['net_pnl'].sum():.2f}")
-            col3.metric("Total Fees", f"{trades_df['fees'].sum():.2f}")
-            col4.metric("Sharpe Ratio", f"{sharpe:.2f}")
-            col5.metric("Trades", f"{len(trades_df)}")
+        sharpe = trades_df['net_pnl'].mean() / trades_df['net_pnl'].std() * np.sqrt(252) if trades_df['net_pnl'].std() > 0 else 0
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Gross PnL", f"{trades_df['pnl'].sum():.2f}")
+        col2.metric("Net PnL", f"{trades_df['net_pnl'].sum():.2f}")
+        col3.metric("Total Fees", f"{trades_df['fees'].sum():.2f}")
+        col4.metric("Sharpe Ratio", f"{sharpe:.2f}")
+        col5.metric("Trades", f"{len(trades_df)}")
 else:
     st.info("📁 Please upload both a CSV and PKL file to begin.")
