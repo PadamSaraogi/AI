@@ -65,107 +65,20 @@ if csv_file and model_file:
                 "pnl_final": "{:+.2f}",
                 "pnl": "{:+.2f}"
             }))
+
+            # Add time-based breakdown
+            trades_df['month'] = trades_df['entry_time'].dt.to_period('M')
+            monthly_pnl = trades_df.groupby('month')['pnl'].sum()
+            monthly_count = trades_df.groupby('month').size()
+
+            st.subheader("📅 Monthly PnL Breakdown")
+            st.bar_chart(monthly_pnl)
+
+            st.subheader("📊 Monthly Trade Count")
+            st.bar_chart(monthly_count)
+
         else:
             st.info("No trades available yet.")
 
-    with tabs[1]:
-        st.subheader("📈 Signal Chart")
-        fig, ax = plt.subplots(figsize=(12, 4))
-        ax.plot(df.index, df['close'], label='Price', color='gray')
-        ax.plot(df[df['signal'] == 1].index, df['close'][df['signal'] == 1], '^', color='green', label='Buy')
-        ax.plot(df[df['signal'] == -1].index, df['close'][df['signal'] == -1], 'v', color='red', label='Sell')
-        ax.legend()
-        st.pyplot(fig)
-
-        df['strategy_return'] = df['signal'].shift(1) * df['close'].pct_change()
-        df['cumulative_return'] = (1 + df['strategy_return'].fillna(0)).cumprod()
-        st.subheader("💹 Cumulative Return vs Price")
-        fig2, ax2 = plt.subplots(figsize=(12, 4))
-        ax2.plot(df.index, df['close'], label='Price', alpha=0.7)
-        ax2b = ax2.twinx()
-        ax2b.plot(df.index, df['cumulative_return'], label='Cumulative Return', color='green')
-        st.pyplot(fig2)
-
-    with tabs[2]:
-        st.subheader("📊 Backtest Results")
-        if trades:
-            trades_df['cumulative_pnl'] = trades_df['pnl'].cumsum()
-            trades_df['drawdown'] = trades_df['cumulative_pnl'] - trades_df['cumulative_pnl'].cummax()
-            trades_df['duration'] = (trades_df['exit_time'] - trades_df['entry_time']).dt.total_seconds() / 60
-
-            fig3, ax3 = plt.subplots(figsize=(12, 3))
-            ax3.plot(trades_df['exit_time'], trades_df['cumulative_pnl'], color='blue')
-            st.pyplot(fig3)
-
-            st.download_button("📥 Download Trades", trades_df.to_csv(index=False).encode(), "trades.csv", "text/csv")
-
-    with tabs[3]:
-        st.subheader("📈 Stats")
-        if trades:
-            sharpe = trades_df['pnl'].mean() / trades_df['pnl'].std() * np.sqrt(252) if trades_df['pnl'].std() > 0 else 0
-            col1, col2, col3, col4, col5 = st.columns(5)
-            col1.metric("Total PnL", f"{trades_df['pnl'].sum():.2f}")
-            col2.metric("Win Rate", f"{(trades_df['pnl'] > 0).mean() * 100:.1f}%")
-            col3.metric("Sharpe Ratio", f"{sharpe:.2f}")
-            col4.metric("Trades", f"{len(trades_df)}")
-            col5.metric("Avg Hold (min)", f"{trades_df['duration'].mean():.1f}")
-
-    with tabs[4]:
-        st.subheader("📊 Additional Insights")
-
-        thresholds = np.arange(0.0, 1.01, 0.05)
-        pnl_list, sharpe_list, dd_list, trade_counts, avg_pnls, win_rates = [], [], [], [], [], []
-
-        for t in thresholds:
-            temp_df = df.copy()
-            temp_df['signal'] = np.where((temp_df['confidence'] >= t) & (temp_df['expected_pnl'] > 0), temp_df['predicted_label'], 0)
-            temp_df['position'] = temp_df['signal'].replace(0, np.nan).ffill()
-            trades_tmp = run_backtest_simulation(temp_df)
-            if trades_tmp:
-                tdf = pd.DataFrame(trades_tmp)
-                pnl = tdf['pnl'].sum()
-                sharpe = tdf['pnl'].mean() / tdf['pnl'].std() * np.sqrt(252) if tdf['pnl'].std() > 0 else 0
-                dd = tdf['pnl'].cumsum().min()
-                trade_count = len(tdf)
-                avg_pnl = tdf['pnl'].mean()
-                win_rate = (tdf['pnl'] > 0).mean() * 100
-            else:
-                pnl = 0
-                sharpe = 0
-                dd = 0
-                trade_count = 0
-                avg_pnl = 0
-                win_rate = 0
-
-            pnl_list.append(pnl)
-            sharpe_list.append(sharpe)
-            dd_list.append(dd)
-            trade_counts.append(trade_count)
-            avg_pnls.append(avg_pnl)
-            win_rates.append(win_rate)
-
-        def plot_metric(y, label):
-            fig, ax = plt.subplots()
-            ax.plot(thresholds, y, marker='o')
-            ax.set_xlabel("Confidence Threshold")
-            ax.set_ylabel(label)
-            ax.set_title(f"{label} vs Threshold")
-            st.pyplot(fig)
-
-        plot_metric(pnl_list, "Total PnL")
-        plot_metric(sharpe_list, "Sharpe Ratio")
-        plot_metric(dd_list, "Max Drawdown")
-        plot_metric(trade_counts, "Trade Count")
-        plot_metric(avg_pnls, "Average PnL per Trade")
-        plot_metric(win_rates, "Win Rate (%)")
-
-        st.subheader("📉 Confusion Matrix")
-        y_true = df['predicted_label']
-        y_pred = model.predict(X)
-        cm = confusion_matrix(y_true, y_pred, labels=model.classes_)
-        fig6, ax6 = plt.subplots()
-        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=model.classes_)
-        disp.plot(ax=ax6)
-        st.pyplot(fig6)
 else:
     st.info("📁 Please upload both a CSV and PKL file to begin.")
