@@ -99,6 +99,18 @@ if csv_file and model_file:
             st.subheader("📊 Monthly Trade Count")
             st.bar_chart(monthly_count)
 
+            st.subheader("📌 TP1 Hit vs Not Hit Summary")
+            tp1_summary = trades_df.groupby('tp1_hit').agg(
+                net_pnl=('net_pnl', 'sum'),
+                avg_fee=('fees', 'mean'),
+                count=('net_pnl', 'count')
+            ).rename(index={True: 'TP1 Hit', False: 'No TP1'})
+            st.dataframe(tp1_summary.style.format({
+                'net_pnl': '{:+.2f}',
+                'avg_fee': '{:.2f}',
+                'count': '{:d}'
+            }))
+
     with tabs[3]:
         st.subheader("📈 Stats")
         if not trades_df.empty:
