@@ -87,16 +87,25 @@ if csv_file and model_file:
         st.subheader("📋 Executed Trades (TP1 + Final Exit Breakdown)")
         if not trades_df.empty:
             display_cols = trades_df[[
-                'trade_type', 'entry_time', 'entry_price', 'tp1_exit_price',
-                'final_exit_price', 'tp1_hit', 'pnl', 'fees', 'net_pnl']].sort_values(by='entry_time', ascending=False).reset_index(drop=True)
+                'entry_time', 'exit_time', 'entry_price', 'tp1_exit_price', 'final_exit_price',
+                'tp1_hit', 'pnl', 'brokerage', 'stt', 'exchange', 'gst', 'stamp', 'demat',
+                'fees', 'net_pnl', 'trade_type', 'day_trade', 'duration_min']]
+            display_cols = display_cols.sort_values(by='entry_time', ascending=False).reset_index(drop=True).sort_values(by='entry_time', ascending=False).reset_index(drop=True)
 
             st.dataframe(display_cols.style.format({
                 "entry_price": "{:.2f}",
                 "tp1_exit_price": "{:.2f}",
                 "final_exit_price": "{:.2f}",
+                "brokerage": "{:.2f}",
+                "stt": "{:.2f}",
+                "exchange": "{:.2f}",
+                "gst": "{:.2f}",
+                "stamp": "{:.2f}",
+                "demat": "{:.2f}",
                 "pnl": "{:+.2f}",
                 "fees": "{:.2f}",
-                "net_pnl": "{:+.2f}"
+                "net_pnl": "{:+.2f}",
+                "duration_min": "{:.1f}"
             }))
 
             trades_df['month'] = trades_df['entry_time'].dt.to_period('M')
