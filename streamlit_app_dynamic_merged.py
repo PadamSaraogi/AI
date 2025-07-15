@@ -55,95 +55,64 @@ if csv_file and model_file:
 
     tabs = st.tabs(["Signals", "Charts", "Backtest", "Stats", "Insights"])
 
-    with tabs[0]:
-        st.subheader("📋 Executed Trades (TP1 + Final Exit Breakdown)")
-        trades = run_backtest_simulation(df)
+    with tabs[1]:
+        st.subheader("📈 Signal Chart")
+        if 'close' in df.columns:
+            fig, ax = plt.subplots(figsize=(12, 4))
+            ax.plot(df.index, df['close'], label='Price', color='gray')
+            ax.plot(df[df['signal'] == 1].index, df['close'][df['signal'] == 1], '^', color='green', label='Buy')
+            ax.plot(df[df['signal'] == -1].index, df['close'][df['signal'] == -1], 'v', color='red', label='Sell')
+            ax.legend()
+            st.pyplot(fig)
 
+            df['strategy_return'] = df['signal'].shift(1) * df['close'].pct_change()
+            df['cumulative_return'] = (1 + df['strategy_return'].fillna(0)).cumprod()
+            st.subheader("💹 Cumulative Return vs Price")
+            fig2, ax2 = plt.subplots(figsize=(12, 4))
+            ax2.plot(df.index, df['close'], label='Price', alpha=0.7)
+            ax2b = ax2.twinx()
+            ax2b.plot(df.index, df['cumulative_return'], label='Cumulative Return', color='green')
+            st.pyplot(fig2)
+
+    with tabs[2]:
+        st.subheader("📊 Backtest Performance")
+        trades = run_backtest_simulation(df)
         if trades:
             trades_df = pd.DataFrame(trades)
             trades_df['entry_time'] = pd.to_datetime(trades_df['entry_time'])
             trades_df['exit_time'] = pd.to_datetime(trades_df['exit_time'])
 
-            has_tp1 = trades_df['tp1_exit_price'].notna() & (trades_df['tp1_exit_price'] != 0)
-            trades_df['tp1_hit'] = has_tp1
-            trades_df['pnl'] = np.where(
-                has_tp1,
-                0.5 * (trades_df['tp1_exit_price'] - trades_df['entry_price']) + 0.5 * (trades_df['final_exit_price'] - trades_df['entry_price']),
-                trades_df['final_exit_price'] - trades_df['entry_price']
-            )
+            trades_df['cumulative_pnl'] = trades_df['net_pnl'].cumsum()
+            trades_df['drawdown'] = trades_df['cumulative_pnl'] - trades_df['cumulative_pnl'].cummax()
+            trades_df['duration_min'] = (trades_df['exit_time'] - trades_df['entry_time']).dt.total_seconds() / 60
 
-            entry_val = trades_df['entry_price']
-            exit_val = trades_df['final_exit_price']
-            trades_df['day_trade'] = trades_df['entry_time'].dt.date == trades_df['exit_time'].dt.date
+            st.line_chart(trades_df.set_index('exit_time')['cumulative_pnl'])
+            st.line_chart(trades_df.set_index('exit_time')['drawdown'])
 
-            buy_val = entry_val
-            sell_val = exit_val
-            total_val = buy_val + sell_val
+            fig3, ax3 = plt.subplots()
+            ax3.hist(trades_df['duration_min'], bins=30, color='skyblue', edgecolor='black')
+            ax3.set_title("Trade Duration (Minutes)")
+            st.pyplot(fig3)
 
-            trades_df['brokerage'] = np.where(trades_df['day_trade'], intraday_brokerage * total_val, delivery_brokerage * total_val)
-            trades_df['stt'] = np.where(trades_df['day_trade'], stt_rate * sell_val, stt_rate * total_val)
-            trades_df['exchange'] = exchange_rate * total_val
-            trades_df['gst'] = gst_rate * (trades_df['brokerage'] + trades_df['exchange'])
-            trades_df['stamp'] = np.where(trades_df['day_trade'], stamp_intraday * buy_val, stamp_delivery * buy_val)
-            trades_df['demat'] = np.where(trades_df['day_trade'], 0.0, demat_fee)
+    with tabs[4]:
+        st.subheader("📉 Model Insights")
+        st.write("### Confusion Matrix")
+        y_true = df['predicted_label']
+        y_pred = model.predict(X)
+        cm = confusion_matrix(y_true, y_pred, labels=model.classes_)
+        fig4, ax4 = plt.subplots()
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=model.classes_)
+        disp.plot(ax=ax4)
+        st.pyplot(fig4)
 
-            trades_df['fees'] = trades_df[['brokerage', 'stt', 'exchange', 'gst', 'stamp', 'demat']].sum(axis=1)
-            trades_df['net_pnl'] = trades_df['pnl'] - trades_df['fees']
+        st.write("### Signal Distribution")
+        signal_counts = df['signal'].value_counts().sort_index()
+        st.bar_chart(signal_counts)
 
-            trades_df['month'] = trades_df['entry_time'].dt.to_period('M')
-            monthly_pnl = trades_df.groupby('month')['net_pnl'].sum()
-            monthly_count = trades_df.groupby('month').size()
+        st.write("### Confidence Histogram")
+        fig5, ax5 = plt.subplots()
+        ax5.hist(df['confidence'], bins=30, color='orange', edgecolor='black')
+        ax5.set_title("Prediction Confidence Distribution")
+        st.pyplot(fig5)
 
-            display_cols = trades_df[[
-                'trade_type', 'entry_time', 'entry_price', 'tp1_exit_price',
-                'final_exit_price', 'tp1_hit', 'pnl', 'fees', 'net_pnl']].sort_values(by='entry_time', ascending=False).reset_index(drop=True)
-
-            st.dataframe(display_cols.style.format({
-                "entry_price": "{:.2f}",
-                "tp1_exit_price": "{:.2f}",
-                "final_exit_price": "{:.2f}",
-                "pnl": "{:+.2f}",
-                "fees": "{:.2f}",
-                "net_pnl": "{:+.2f}"
-            }))
-
-            st.subheader("📅 Monthly Net PnL Breakdown")
-            st.bar_chart(monthly_pnl)
-
-            st.subheader("📊 Monthly Trade Count")
-            st.bar_chart(monthly_count)
-
-            st.subheader("📌 TP1 Hit vs Not Hit Summary")
-            tp1_summary = trades_df.groupby('tp1_hit').agg(
-                net_pnl=('net_pnl', 'sum'),
-                avg_fee=('fees', 'mean'),
-                count=('net_pnl', 'count')
-            ).rename(index={True: 'TP1 Hit', False: 'No TP1'})
-            st.dataframe(tp1_summary.style.format({
-                'net_pnl': '{:+.2f}',
-                'avg_fee': '{:.2f}',
-                'count': '{:d}'
-            }))
-
-            st.subheader("📊 Fee Component Breakdown (Last Trade)")
-            if not trades_df.empty:
-                last = trades_df.iloc[-1]
-                fee_labels = ['Brokerage', 'STT', 'Exchange', 'GST', 'Stamp', 'Demat']
-                fee_values = [last.brokerage, last.stt, last.exchange, last.gst, last.stamp, last.demat]
-                fig, ax = plt.subplots()
-                ax.pie(fee_values, labels=fee_labels, autopct='%1.2f%%', startangle=90)
-                ax.set_title("Fee Breakdown")
-                st.pyplot(fig)
-
-    with tabs[3]:
-        st.subheader("📈 Stats")
-        if not trades_df.empty:
-            sharpe = trades_df['net_pnl'].mean() / trades_df['net_pnl'].std() * np.sqrt(252) if trades_df['net_pnl'].std() > 0 else 0
-            col1, col2, col3, col4, col5 = st.columns(5)
-            col1.metric("Gross PnL", f"{trades_df['pnl'].sum():.2f}")
-            col2.metric("Net PnL", f"{trades_df['net_pnl'].sum():.2f}")
-            col3.metric("Total Fees", f"{trades_df['fees'].sum():.2f}")
-            col4.metric("Sharpe Ratio", f"{sharpe:.2f}")
-            col5.metric("Trades", f"{len(trades_df)}")
-else:
-    st.info("📁 Please upload both a CSV and PKL file to begin.")
+    # Signals and Stats tabs already defined above.
