@@ -59,25 +59,26 @@ if csv_file and model_file:
     if not trades_df.empty:
         trades_df['entry_time'] = pd.to_datetime(trades_df['entry_time'])
         trades_df['exit_time'] = pd.to_datetime(trades_df['exit_time'])
-        has_tp1 = trades_df['tp1_exit_price'].notna() & (trades_df['tp1_exit_price'] != 0)
-        trades_df['tp1_hit'] = has_tp1
+        trades_df['duration_min'] = (trades_df['exit_time'] - trades_df['entry_time']).dt.total_seconds() / 60
+        trades_df['tp1_hit'] = trades_df['tp1_exit_price'].notna() & (trades_df['tp1_exit_price'] != 0)
         trades_df['pnl'] = np.where(
-            has_tp1,
-            0.5 * (trades_df['tp1_exit_price'] - trades_df['entry_price']) + 0.5 * (trades_df['final_exit_price'] - trades_df['entry_price']),
+            trades_df['tp1_hit'],
+            0.5 * (trades_df['tp1_exit_price'] - trades_df['entry_price']) +
+            0.5 * (trades_df['final_exit_price'] - trades_df['entry_price']),
             trades_df['final_exit_price'] - trades_df['entry_price']
         )
-        entry_val = trades_df['entry_price']
-        exit_val = trades_df['final_exit_price']
         trades_df['day_trade'] = trades_df['entry_time'].dt.date == trades_df['exit_time'].dt.date
-        buy_val = entry_val
-        sell_val = exit_val
+        buy_val = trades_df['entry_price']
+        sell_val = trades_df['final_exit_price']
         total_val = buy_val + sell_val
+
         trades_df['brokerage'] = np.where(trades_df['day_trade'], intraday_brokerage * total_val, delivery_brokerage * total_val)
         trades_df['stt'] = np.where(trades_df['day_trade'], stt_rate * sell_val, stt_rate * total_val)
         trades_df['exchange'] = exchange_rate * total_val
         trades_df['gst'] = gst_rate * (trades_df['brokerage'] + trades_df['exchange'])
         trades_df['stamp'] = np.where(trades_df['day_trade'], stamp_intraday * buy_val, stamp_delivery * buy_val)
         trades_df['demat'] = np.where(trades_df['day_trade'], 0.0, demat_fee)
+
         trades_df['fees'] = trades_df[['brokerage', 'stt', 'exchange', 'gst', 'stamp', 'demat']].sum(axis=1)
         trades_df['net_pnl'] = trades_df['pnl'] - trades_df['fees']
 
@@ -90,44 +91,11 @@ if csv_file and model_file:
                 'entry_time', 'exit_time', 'entry_price', 'tp1_exit_price', 'final_exit_price',
                 'tp1_hit', 'pnl', 'brokerage', 'stt', 'exchange', 'gst', 'stamp', 'demat',
                 'fees', 'net_pnl', 'trade_type', 'day_trade', 'duration_min']]
-            display_cols = display_cols.sort_values(by='entry_time', ascending=False).reset_index(drop=True).sort_values(by='entry_time', ascending=False).reset_index(drop=True)
-
             st.dataframe(display_cols.style.format({
-                "entry_price": "{:.2f}",
-                "tp1_exit_price": "{:.2f}",
-                "final_exit_price": "{:.2f}",
-                "brokerage": "{:.2f}",
-                "stt": "{:.2f}",
-                "exchange": "{:.2f}",
-                "gst": "{:.2f}",
-                "stamp": "{:.2f}",
-                "demat": "{:.2f}",
-                "pnl": "{:+.2f}",
-                "fees": "{:.2f}",
-                "net_pnl": "{:+.2f}",
-                "duration_min": "{:.1f}"
-            }))
-
-            trades_df['month'] = trades_df['entry_time'].dt.to_period('M')
-            monthly_pnl = trades_df.groupby('month')['net_pnl'].sum()
-            monthly_count = trades_df.groupby('month').size()
-
-            st.subheader("📅 Monthly Net PnL Breakdown")
-            st.bar_chart(monthly_pnl)
-
-            st.subheader("📊 Monthly Trade Count")
-            st.bar_chart(monthly_count)
-
-            st.subheader("📌 TP1 Hit vs Not Hit Summary")
-            tp1_summary = trades_df.groupby('tp1_hit').agg(
-                net_pnl=('net_pnl', 'sum'),
-                avg_fee=('fees', 'mean'),
-                count=('net_pnl', 'count')
-            ).rename(index={True: 'TP1 Hit', False: 'No TP1'})
-            st.dataframe(tp1_summary.style.format({
-                'net_pnl': '{:+.2f}',
-                'avg_fee': '{:.2f}',
-                'count': '{:d}'
+                'entry_price': '{:.2f}', 'tp1_exit_price': '{:.2f}', 'final_exit_price': '{:.2f}',
+                'pnl': '{:+.2f}', 'fees': '{:.2f}', 'net_pnl': '{:+.2f}',
+                'brokerage': '{:.2f}', 'stt': '{:.2f}', 'exchange': '{:.2f}',
+                'gst': '{:.2f}', 'stamp': '{:.2f}', 'demat': '{:.2f}', 'duration_min': '{:.1f}'
             }))
 
     with tabs[1]:
@@ -154,8 +122,6 @@ if csv_file and model_file:
         if not trades_df.empty:
             trades_df['cumulative_pnl'] = trades_df['net_pnl'].cumsum()
             trades_df['drawdown'] = trades_df['cumulative_pnl'] - trades_df['cumulative_pnl'].cummax()
-            trades_df['duration_min'] = (trades_df['exit_time'] - trades_df['entry_time']).dt.total_seconds() / 60
-
             st.line_chart(trades_df.set_index('exit_time')['cumulative_pnl'])
             st.line_chart(trades_df.set_index('exit_time')['drawdown'])
 
