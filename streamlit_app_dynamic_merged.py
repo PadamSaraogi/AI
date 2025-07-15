@@ -14,6 +14,17 @@ with st.sidebar:
     csv_file = st.file_uploader("📂 Upload your indicator CSV file", type="csv")
     model_file = st.file_uploader("🧠 Upload your trained ML model (.pkl)", type="pkl")
 
+    st.header("🔧 Fee Settings")
+    st.caption("Customize fee rates (in %) or flat values")
+    intraday_brokerage = st.number_input("Intraday Brokerage (%)", value=0.025) / 100
+    delivery_brokerage = st.number_input("Delivery Brokerage (%)", value=0.25) / 100
+    stt_rate = st.number_input("STT Rate (%)", value=0.025) / 100
+    exchange_rate = st.number_input("Exchange Charges (%)", value=0.00325) / 100
+    gst_rate = st.number_input("GST Rate (%)", value=18.0) / 100
+    stamp_intraday = st.number_input("Stamp Duty (Intraday, %)", value=0.003) / 100
+    stamp_delivery = st.number_input("Stamp Duty (Delivery, %)", value=0.015) / 100
+    demat_fee = st.number_input("Demat Charges (Flat ₹)", value=23.60)
+
 if csv_file and model_file:
     df = pd.read_csv(csv_file, parse_dates=['datetime'])
     df.set_index('datetime', inplace=True)
@@ -65,15 +76,18 @@ if csv_file and model_file:
             exit_val = trades_df['final_exit_price']
             trades_df['day_trade'] = trades_df['entry_time'].dt.date == trades_df['exit_time'].dt.date
 
-            brokerage = np.where(trades_df['day_trade'], 0.00025 * (entry_val + exit_val), 0.0025 * (entry_val + exit_val))
-            stt = np.where(trades_df['day_trade'], 0.00025 * exit_val, 0.001 * (entry_val + exit_val))
-            exchange = 0.0000325 * (entry_val + exit_val)
-            sebi = 0.000001 * (entry_val + exit_val)
-            stamp = np.where(trades_df['day_trade'], 0.0003 * entry_val, 0.00015 * entry_val)
-            gst = 0.18 * (brokerage + exchange)
-            demat = np.where(trades_df['day_trade'], 0.0, 23.60)
+            buy_val = entry_val
+            sell_val = exit_val
+            total_val = buy_val + sell_val
 
-            trades_df['fees'] = brokerage + stt + exchange + sebi + stamp + gst + demat
+            trades_df['brokerage'] = np.where(trades_df['day_trade'], intraday_brokerage * total_val, delivery_brokerage * total_val)
+            trades_df['stt'] = np.where(trades_df['day_trade'], stt_rate * sell_val, stt_rate * total_val)
+            trades_df['exchange'] = exchange_rate * total_val
+            trades_df['gst'] = gst_rate * (trades_df['brokerage'] + trades_df['exchange'])
+            trades_df['stamp'] = np.where(trades_df['day_trade'], stamp_intraday * buy_val, stamp_delivery * buy_val)
+            trades_df['demat'] = np.where(trades_df['day_trade'], 0.0, demat_fee)
+
+            trades_df['fees'] = trades_df[['brokerage', 'stt', 'exchange', 'gst', 'stamp', 'demat']].sum(axis=1)
             trades_df['net_pnl'] = trades_df['pnl'] - trades_df['fees']
 
             trades_df['month'] = trades_df['entry_time'].dt.to_period('M')
@@ -110,6 +124,16 @@ if csv_file and model_file:
                 'avg_fee': '{:.2f}',
                 'count': '{:d}'
             }))
+
+            st.subheader("📊 Fee Component Breakdown (Last Trade)")
+            if not trades_df.empty:
+                last = trades_df.iloc[-1]
+                fee_labels = ['Brokerage', 'STT', 'Exchange', 'GST', 'Stamp', 'Demat']
+                fee_values = [last.brokerage, last.stt, last.exchange, last.gst, last.stamp, last.demat]
+                fig, ax = plt.subplots()
+                ax.pie(fee_values, labels=fee_labels, autopct='%1.2f%%', startangle=90)
+                ax.set_title("Fee Breakdown")
+                st.pyplot(fig)
 
     with tabs[3]:
         st.subheader("📈 Stats")
