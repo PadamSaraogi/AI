@@ -9,7 +9,7 @@ from backtest import run_backtest_simulation
 st.set_page_config(layout="wide")
 st.title("📈 Smart Trading Dashboard")
 
-# Sidebar
+# === SIDEBAR CONFIG ===
 with st.sidebar:
     st.header("Configuration")
     csv_file = st.file_uploader("📂 Upload your indicator CSV file", type="csv")
@@ -25,14 +25,15 @@ with st.sidebar:
     stamp_delivery = st.number_input("Stamp Duty (Delivery, %)", value=0.015) / 100
     demat_fee = st.number_input("Demat Charges (Flat ₹)", value=23.60)
 
-# Main logic
+# === MAIN LOGIC ===
 if csv_file and model_file:
     df = pd.read_csv(csv_file, parse_dates=['datetime'])
     df.set_index('datetime', inplace=True)
     model = joblib.load(model_file)
 
     st.success("✅ Model and data loaded.")
-    features = ['ema_20', 'ema_50', 'ATR', 'ADX14', 'RSI', 'bb_width', 'volume_spike_ratio', 'return_1h', 'hour_of_day']
+    features = ['ema_20', 'ema_50', 'ATR', 'ADX14', 'RSI', 'bb_width',
+                'volume_spike_ratio', 'return_1h', 'hour_of_day']
     X = df[features]
     proba = model.predict_proba(X)
     df['predicted_label'] = model.predict(X)
@@ -40,17 +41,18 @@ if csv_file and model_file:
 
     if hasattr(model, 'feature_importances_'):
         st.subheader("🧠 Feature Importance")
-        feat_imp = pd.Series(model.feature_importances_, index=X.columns).sort_values()
-        st.bar_chart(feat_imp)
+        st.bar_chart(pd.Series(model.feature_importances_, index=X.columns).sort_values())
 
     recent_signals = df[df['predicted_label'] != 0].tail(100)
     dynamic_threshold = recent_signals['confidence'].quantile(0.25) if not recent_signals.empty else 0.6
     threshold = st.sidebar.slider("🎚 Confidence Threshold", 0.0, 1.0, float(dynamic_threshold), 0.01)
 
     df['expected_pnl'] = df['confidence'] * df['predicted_label'] * df['return_1h']
-    df['signal'] = np.where((df['confidence'] >= threshold) & (df['expected_pnl'] > 0), df['predicted_label'], 0)
+    df['signal'] = np.where((df['confidence'] >= threshold) & (df['expected_pnl'] > 0),
+                            df['predicted_label'], 0)
     df['position'] = df['signal'].replace(0, np.nan).ffill()
 
+    # === BACKTEST ===
     trades = run_backtest_simulation(df)
     trades_df = pd.DataFrame(trades) if trades else pd.DataFrame()
 
@@ -70,24 +72,33 @@ if csv_file and model_file:
         sell_val = trades_df['final_exit_price']
         total_val = buy_val + sell_val
 
-        trades_df['brokerage'] = np.where(trades_df['day_trade'], intraday_brokerage * total_val, delivery_brokerage * total_val)
-        trades_df['stt'] = np.where(trades_df['day_trade'], stt_rate * sell_val, stt_rate * total_val)
+        trades_df['brokerage'] = np.where(trades_df['day_trade'],
+                                          intraday_brokerage * total_val,
+                                          delivery_brokerage * total_val)
+        trades_df['stt'] = np.where(trades_df['day_trade'],
+                                    stt_rate * sell_val,
+                                    stt_rate * total_val)
         trades_df['exchange'] = exchange_rate * total_val
         trades_df['gst'] = gst_rate * (trades_df['brokerage'] + trades_df['exchange'])
-        trades_df['stamp'] = np.where(trades_df['day_trade'], stamp_intraday * buy_val, stamp_delivery * buy_val)
+        trades_df['stamp'] = np.where(trades_df['day_trade'],
+                                      stamp_intraday * buy_val,
+                                      stamp_delivery * buy_val)
         trades_df['demat'] = np.where(trades_df['day_trade'], 0.0, demat_fee)
         trades_df['fees'] = trades_df[['brokerage', 'stt', 'exchange', 'gst', 'stamp', 'demat']].sum(axis=1)
         trades_df['net_pnl'] = trades_df['pnl'] - trades_df['fees']
 
-        # ✅ FIX: map confidence to trades_df
-        trades_df['confidence'] = trades_df['entry_time'].map(lambda t: df.loc[df.index.get_indexer([t], method='nearest')[0], 'confidence'])
+        # ✅ SAFELY map confidence to each trade using merge_asof
+        df_reset = df.reset_index()[['datetime', 'confidence']].sort_values('datetime')
+        trades_df = trades_df.sort_values('entry_time')
+        trades_df = pd.merge_asof(trades_df, df_reset, left_on='entry_time', right_on='datetime', direction='nearest')
 
-    # Tabs
+    # === TABS ===
     tabs = st.tabs(["Trades", "Charts", "Backtest", "Sensitivity", "Insights"])
 
     with tabs[0]:
         st.subheader("📋 Trades Executed")
-        st.dataframe(trades_df)
+        if not trades_df.empty:
+            st.dataframe(trades_df)
 
     with tabs[1]:
         st.subheader("📈 Signal Chart")
@@ -101,29 +112,31 @@ if csv_file and model_file:
 
     with tabs[2]:
         st.subheader("📊 Backtest Performance")
-        trades_df['cumulative_pnl'] = trades_df['net_pnl'].cumsum()
-        trades_df['drawdown'] = trades_df['cumulative_pnl'] - trades_df['cumulative_pnl'].cummax()
-        st.line_chart(trades_df.set_index('exit_time')['cumulative_pnl'])
-        st.line_chart(trades_df.set_index('exit_time')['drawdown'])
+        if not trades_df.empty:
+            trades_df['cumulative_pnl'] = trades_df['net_pnl'].cumsum()
+            trades_df['drawdown'] = trades_df['cumulative_pnl'] - trades_df['cumulative_pnl'].cummax()
+            st.line_chart(trades_df.set_index('exit_time')['cumulative_pnl'])
+            st.line_chart(trades_df.set_index('exit_time')['drawdown'])
 
     with tabs[3]:
-        st.subheader("📉 Confidence Threshold Sensitivity")
-        thresholds = np.arange(0.4, 0.91, 0.05)
-        results = []
-        for t in thresholds:
-            sub = df[(df['confidence'] >= t) & (df['expected_pnl'] > 0)]
-            signal_count = len(sub)
-            wins = (sub['predicted_label'] == sub['signal']).sum() if 'signal' in sub.columns else 0
-            avg_conf = sub['confidence'].mean() if not sub.empty else 0
-            sub_trades = trades_df[trades_df['confidence'] >= t]
-            gross_pnl = sub_trades['pnl'].sum() if not sub_trades.empty else 0
-            results.append((t, signal_count, wins, avg_conf, gross_pnl))
+        st.subheader("🎛 Threshold Sensitivity")
+        if not trades_df.empty:
+            thresholds = np.arange(0.4, 0.91, 0.05)
+            results = []
+            for t in thresholds:
+                sub = df[(df['confidence'] >= t) & (df['expected_pnl'] > 0)]
+                signal_count = len(sub)
+                wins = (sub['predicted_label'] == sub['signal']).sum()
+                avg_conf = sub['confidence'].mean() if not sub.empty else 0
+                sub_trades = trades_df[trades_df['confidence'] >= t]
+                gross_pnl = sub_trades['pnl'].sum() if not sub_trades.empty else 0
+                results.append((t, signal_count, wins, avg_conf, gross_pnl))
 
-        sens_df = pd.DataFrame(results, columns=["Threshold", "Signal Count", "Predicted Match", "Avg Confidence", "Gross PnL"])
-        st.dataframe(sens_df.set_index("Threshold"))
+            sens_df = pd.DataFrame(results, columns=["Threshold", "Signal Count", "Predicted Match", "Avg Confidence", "Gross PnL"])
+            st.dataframe(sens_df.set_index("Threshold"))
 
     with tabs[4]:
-        st.subheader("📊 Confusion Matrix")
+        st.subheader("📉 Model Insights")
         y_true = df['predicted_label']
         y_pred = model.predict(X)
         cm = confusion_matrix(y_true, y_pred, labels=model.classes_)
