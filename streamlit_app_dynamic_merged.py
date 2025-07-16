@@ -9,13 +9,13 @@ from backtest import run_backtest_simulation
 st.set_page_config(layout="wide")
 st.title("📈 Smart Trading Dashboard")
 
+# Sidebar
 with st.sidebar:
     st.header("Configuration")
     csv_file = st.file_uploader("📂 Upload your indicator CSV file", type="csv")
     model_file = st.file_uploader("🧠 Upload your trained ML model (.pkl)", type="pkl")
 
     st.header("🔧 Fee Settings")
-    st.caption("Customize fee rates (in %) or flat values")
     intraday_brokerage = st.number_input("Intraday Brokerage (%)", value=0.025) / 100
     delivery_brokerage = st.number_input("Delivery Brokerage (%)", value=0.25) / 100
     stt_rate = st.number_input("STT Rate (%)", value=0.025) / 100
@@ -25,16 +25,14 @@ with st.sidebar:
     stamp_delivery = st.number_input("Stamp Duty (Delivery, %)", value=0.015) / 100
     demat_fee = st.number_input("Demat Charges (Flat ₹)", value=23.60)
 
+# Main logic
 if csv_file and model_file:
     df = pd.read_csv(csv_file, parse_dates=['datetime'])
     df.set_index('datetime', inplace=True)
     model = joblib.load(model_file)
 
     st.success("✅ Model and data loaded.")
-    st.write(f"CSV: `{csv_file.name}` | Model: `{model_file.name}`")
-
-    features = ['ema_20', 'ema_50', 'ATR', 'ADX14', 'RSI', 'bb_width',
-                'volume_spike_ratio', 'return_1h', 'hour_of_day']
+    features = ['ema_20', 'ema_50', 'ATR', 'ADX14', 'RSI', 'bb_width', 'volume_spike_ratio', 'return_1h', 'hour_of_day']
     X = df[features]
     proba = model.predict_proba(X)
     df['predicted_label'] = model.predict(X)
@@ -82,34 +80,30 @@ if csv_file and model_file:
         trades_df['fees'] = trades_df[['brokerage', 'stt', 'exchange', 'gst', 'stamp', 'demat']].sum(axis=1)
         trades_df['net_pnl'] = trades_df['pnl'] - trades_df['fees']
 
-    tabs = st.tabs(["Signals", "Charts", "Backtest", "Stats", "Insights"])
+# Tab: Confidence Threshold Analysis
+    st.header("📊 Confidence Threshold Sensitivity Analysis")
+    if not trades_df.empty:
+        thresholds = np.arange(0.4, 0.91, 0.05)
+        results = []
+        for t in thresholds:
+            sub = df[(df['confidence'] >= t) & (df['expected_pnl'] > 0)]
+            signal_count = len(sub)
+            wins = (sub['predicted_label'] == sub['signal']).sum() if 'signal' in sub.columns else 0
+            avg_conf = sub['confidence'].mean() if not sub.empty else 0
+            sub_trades = trades_df[trades_df['confidence'] >= t]
+            gross_pnl = sub_trades['pnl'].sum() if not sub_trades.empty else 0
+            results.append((t, signal_count, wins, avg_conf, gross_pnl))
 
-    with tabs[3]:
-        st.subheader("📊 Confidence Threshold Sensitivity Analysis")
-        if not trades_df.empty:
-            thresholds = np.arange(0.4, 0.91, 0.05)
-            results = []
-            for t in thresholds:
-                sub = df[(df['confidence'] >= t) & (df['expected_pnl'] > 0)]
-                signal_count = len(sub)
-                wins = (sub['predicted_label'] == sub['signal']).sum() if 'signal' in sub.columns else 0
-                avg_conf = sub['confidence'].mean() if not sub.empty else 0
-                sub_trades = trades_df[trades_df['confidence'] >= t]  # ✅ FIXED LINE
-                gross_pnl = sub_trades['pnl'].sum() if not sub_trades.empty else 0
-                results.append((t, signal_count, wins, avg_conf, gross_pnl))
+        sens_df = pd.DataFrame(results, columns=["Threshold", "Signal Count", "Predicted Match", "Avg Confidence", "Gross PnL"])
+        st.dataframe(sens_df.set_index("Threshold"))
 
-            sens_df = pd.DataFrame(results, columns=["Threshold", "Signal Count", "Predicted Match", "Avg Confidence", "Gross PnL"])
-            st.dataframe(sens_df.set_index("Threshold"))
-
-        st.subheader("📈 Stats")
-        if not trades_df.empty:
-            sharpe = trades_df['net_pnl'].mean() / trades_df['net_pnl'].std() * np.sqrt(252) if trades_df['net_pnl'].std() > 0 else 0
-            col1, col2, col3, col4, col5 = st.columns(5)
-            col1.metric("Gross PnL", f"{trades_df['pnl'].sum():.2f}")
-            col2.metric("Net PnL", f"{trades_df['net_pnl'].sum():.2f}")
-            col3.metric("Total Fees", f"{trades_df['fees'].sum():.2f}")
-            col4.metric("Sharpe Ratio", f"{sharpe:.2f}")
-            col5.metric("Trades", f"{len(trades_df)}")
-
-# Add other tabs ([0], [1], [2], [4]) back in below if needed
-
+# Tab: Stats
+    st.header("📈 Stats")
+    if not trades_df.empty:
+        sharpe = trades_df['net_pnl'].mean() / trades_df['net_pnl'].std() * np.sqrt(252) if trades_df['net_pnl'].std() > 0 else 0
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Gross PnL", f"{trades_df['pnl'].sum():.2f}")
+        col2.metric("Net PnL", f"{trades_df['net_pnl'].sum():.2f}")
+        col3.metric("Total Fees", f"{trades_df['fees'].sum():.2f}")
+        col4.metric("Sharpe Ratio", f"{sharpe:.2f}")
+        col5.metric("Trades", f"{len(trades_df)}")
