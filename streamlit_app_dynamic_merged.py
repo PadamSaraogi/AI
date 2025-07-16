@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -10,6 +9,7 @@ from backtest import run_backtest_simulation
 st.set_page_config(layout="wide")
 st.title("📈 Smart Trading Dashboard")
 
+# Sidebar
 with st.sidebar:
     st.header("Configuration")
     csv_file = st.file_uploader("📂 Upload your indicator CSV file", type="csv")
@@ -25,6 +25,7 @@ with st.sidebar:
     stamp_delivery = st.number_input("Stamp Duty (Delivery, %)", value=0.015) / 100
     demat_fee = st.number_input("Demat Charges (Flat ₹)", value=23.60)
 
+# Main logic
 if csv_file and model_file:
     df = pd.read_csv(csv_file, parse_dates=['datetime'])
     df.set_index('datetime', inplace=True)
@@ -75,14 +76,17 @@ if csv_file and model_file:
         trades_df['gst'] = gst_rate * (trades_df['brokerage'] + trades_df['exchange'])
         trades_df['stamp'] = np.where(trades_df['day_trade'], stamp_intraday * buy_val, stamp_delivery * buy_val)
         trades_df['demat'] = np.where(trades_df['day_trade'], 0.0, demat_fee)
-
         trades_df['fees'] = trades_df[['brokerage', 'stt', 'exchange', 'gst', 'stamp', 'demat']].sum(axis=1)
         trades_df['net_pnl'] = trades_df['pnl'] - trades_df['fees']
 
-    tabs = st.tabs(["Signals", "Charts", "Backtest", "Stats", "Insights"])
+        # ✅ FIX: map confidence to trades_df
+        trades_df['confidence'] = trades_df['entry_time'].map(lambda t: df.loc[df.index.get_indexer([t], method='nearest')[0], 'confidence'])
+
+    # Tabs
+    tabs = st.tabs(["Trades", "Charts", "Backtest", "Sensitivity", "Insights"])
 
     with tabs[0]:
-        st.subheader("📋 Executed Trades")
+        st.subheader("📋 Trades Executed")
         st.dataframe(trades_df)
 
     with tabs[1]:
@@ -103,7 +107,7 @@ if csv_file and model_file:
         st.line_chart(trades_df.set_index('exit_time')['drawdown'])
 
     with tabs[3]:
-        st.subheader("📊 Threshold Sensitivity")
+        st.subheader("📉 Confidence Threshold Sensitivity")
         thresholds = np.arange(0.4, 0.91, 0.05)
         results = []
         for t in thresholds:
@@ -119,7 +123,7 @@ if csv_file and model_file:
         st.dataframe(sens_df.set_index("Threshold"))
 
     with tabs[4]:
-        st.subheader("📉 Model Insights")
+        st.subheader("📊 Confusion Matrix")
         y_true = df['predicted_label']
         y_pred = model.predict(X)
         cm = confusion_matrix(y_true, y_pred, labels=model.classes_)
