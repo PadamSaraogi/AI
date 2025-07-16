@@ -119,28 +119,33 @@ if csv_file and model_file:
 
         # --- Intraday Summary ---
         intraday_df = trades_df[trades_df['day_trade']]
+        st.markdown("### 💼 Intraday Trades")
         if not intraday_df.empty:
-            st.markdown("### 💼 Intraday Trades")
-            col1, col2, col3, col4, col5, col6 = st.columns(6)
-            col1.metric("Trades", len(intraday_df))
-            col2.metric("Win Rate", f"{(intraday_df['net_pnl'] > 0).mean() * 100:.1f}%")
-            col3.metric("Avg Duration", f"{intraday_df['duration_min'].mean():.1f} min")
-            col4.metric("Gross PnL", f"{intraday_df['pnl'].sum():.2f}")
-            col5.metric("Net PnL", f"{intraday_df['net_pnl'].sum():.2f}")
-            col6.metric("Fees", f"{intraday_df['fees'].sum():.2f}")
+            intraday_winrate = (intraday_df['net_pnl'] > 0).mean() * 100
+        else:
+            intraday_winrate = 0.0
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1.metric("Trades", len(intraday_df))
+        col2.metric("Win Rate", f"{intraday_winrate:.1f}%")
+        col3.metric("Avg Duration", f"{intraday_df['duration_min'].mean():.1f} min" if not intraday_df.empty else "0.0 min")
+        col4.metric("Gross PnL", f"{intraday_df['pnl'].sum():.2f}")
+        col5.metric("Net PnL", f"{intraday_df['net_pnl'].sum():.2f}")
+        col6.metric("Fees", f"{intraday_df['fees'].sum():.2f}")
 
         # --- Delivery Summary ---
         delivery_df = trades_df[~trades_df['day_trade']]
+        st.markdown("### 📦 Delivery Trades")
         if not delivery_df.empty:
-            st.markdown("### 📦 Delivery Trades")
-            col1, col2, col3, col4, col5, col6 = st.columns(6)
-            col1.metric("Trades", len(delivery_df))
-            col2.metric("Win Rate", f"{(delivery_df['net_pnl'] > 0).mean() * 100:.1f}%")
-            col3.metric("Avg Duration", f"{delivery_df['duration_min'].mean():.1f} min")
-            col4.metric("Gross PnL", f"{delivery_df['pnl'].sum():.2f}")
-            col5.metric("Net PnL", f"{delivery_df['net_pnl'].sum():.2f}")
-            col6.metric("Fees", f"{delivery_df['fees'].sum():.2f}")
-
+            delivery_winrate = (delivery_df['net_pnl'] > 0).mean() * 100
+        else:
+            delivery_winrate = 0.0
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1.metric("Trades", len(delivery_df))
+        col2.metric("Win Rate", f"{delivery_winrate:.1f}%")
+        col3.metric("Avg Duration", f"{delivery_df['duration_min'].mean():.1f} min" if not delivery_df.empty else "0.0 min")
+        col4.metric("Gross PnL", f"{delivery_df['pnl'].sum():.2f}")
+        col5.metric("Net PnL", f"{delivery_df['net_pnl'].sum():.2f}")
+        col6.metric("Fees", f"{delivery_df['fees'].sum():.2f}")
         # --- Filters ---
         st.subheader("🧰 Trade Filters")
         with st.expander("🔍 Filter Options"):
