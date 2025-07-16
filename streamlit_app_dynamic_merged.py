@@ -142,7 +142,7 @@ if csv_file and model_file:
                 avg_conf = sub['confidence'].mean() if not sub.empty else 0
                 results.append((t, signal_count, wins, avg_conf))
 
-                                            gross_pnls = []
+                gross_pnls = []
                 for t in thresholds:
                     sub_trades = trades_df[df['confidence'] >= t]
                     gross_pnls.append(sub_trades['pnl'].sum() if not sub_trades.empty else 0)
