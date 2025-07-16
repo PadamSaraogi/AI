@@ -150,15 +150,18 @@ if csv_file and model_file:
         st.subheader("🧰 Trade Filters")
         with st.expander("🔍 Filter Options"):
             trade_type_filter = st.selectbox("Trade Type", options=["All", "Buy", "Sell"])
-            daytrade_only = st.checkbox("Show only Intraday Trades", value=True)
-            daytrade_only = st.checkbox("Show only Delivery Trades", value=False)
+            daytrade_only = st.checkbox("Show only Day Trades", value=True)
+            delivery_only = st.checkbox("Show only Delivery Trades", value=False)
+
 
         filtered_df = trades_df.copy()
         if trade_type_filter != "All":
             filtered_df = filtered_df[filtered_df['trade_type'] == trade_type_filter]
         if daytrade_only:
             filtered_df = filtered_df[filtered_df['day_trade']]
-
+        if delivery_only:
+            filtered_df = filtered_df[~filtered_df['day_trade']]
+            
         # --- Breakdown Table ---
         st.subheader("📋 Executed Trades – Detailed Breakdown")
 
