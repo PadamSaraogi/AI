@@ -100,7 +100,7 @@ if csv_file and model_file:
         if not trades_df.empty:
             st.dataframe(trades_df)
 
-with tabs[1]:
+    with tabs[1]:
     st.subheader("📈 Price with Signal Overlay")
     if 'close' in df.columns:
         fig, ax = plt.subplots(figsize=(12, 4))
