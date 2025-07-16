@@ -95,7 +95,7 @@ if csv_file and model_file:
     # === TABS ===
     tabs = st.tabs(["Trades", "Charts", "Backtest", "Sensitivity", "Insights"])
 
-   with tabs[0]:
+    with tabs[0]:
     st.subheader("📊 Trade Summary Stats")
 
     if not trades_df.empty:
