@@ -120,17 +120,26 @@ with tabs[1]:
     ax2.set_xticks([])
     st.pyplot(fig2)
 
-    # Cumulative Strategy Return vs Buy-and-Hold
-    st.subheader("📊 Cumulative Return: Strategy vs Buy & Hold")
-    df['strategy_return'] = df['signal'].shift(1) * df['close'].pct_change()
-    df['cumulative_strategy'] = (1 + df['strategy_return'].fillna(0)).cumprod()
-    df['cumulative_hold'] = df['close'] / df['close'].iloc[0]
-    fig3, ax3 = plt.subplots(figsize=(12, 4))
-    ax3.plot(df.index, df['cumulative_strategy'], label='Strategy', color='green')
-    ax3.plot(df.index, df['cumulative_hold'], label='Buy & Hold', color='blue')
-    ax3.set_title("Cumulative Returns")
-    ax3.legend()
-    st.pyplot(fig3)
+st.subheader("📊 Cumulative Return %: Strategy vs Buy & Hold")
+
+# Calculate strategy and buy-hold cumulative returns
+df['strategy_return'] = df['signal'].shift(1) * df['close'].pct_change()
+df['cumulative_strategy'] = (1 + df['strategy_return'].fillna(0)).cumprod()
+df['cumulative_hold'] = df['close'] / df['close'].iloc[0]
+
+# Convert to percentage
+df['cumulative_strategy_pct'] = (df['cumulative_strategy'] - 1) * 100
+df['cumulative_hold_pct'] = (df['cumulative_hold'] - 1) * 100
+
+# Plot
+fig, ax = plt.subplots(figsize=(12, 4))
+ax.plot(df.index, df['cumulative_strategy_pct'], label='Strategy', color='green')
+ax.plot(df.index, df['cumulative_hold_pct'], label='Buy & Hold', color='blue')
+ax.set_ylabel("Cumulative Return (%)")
+ax.set_title("Cumulative Return %: Strategy vs Buy & Hold")
+ax.legend()
+st.pyplot(fig)
+
 
     # Volatility Chart (ATR)
     st.subheader("🌪 ATR (Volatility)")
