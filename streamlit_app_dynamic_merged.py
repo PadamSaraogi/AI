@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -9,7 +10,6 @@ from backtest import run_backtest_simulation
 st.set_page_config(layout="wide")
 st.title("📈 Smart Trading Dashboard")
 
-# Sidebar
 with st.sidebar:
     st.header("Configuration")
     csv_file = st.file_uploader("📂 Upload your indicator CSV file", type="csv")
@@ -25,7 +25,6 @@ with st.sidebar:
     stamp_delivery = st.number_input("Stamp Duty (Delivery, %)", value=0.015) / 100
     demat_fee = st.number_input("Demat Charges (Flat ₹)", value=23.60)
 
-# Main logic
 if csv_file and model_file:
     df = pd.read_csv(csv_file, parse_dates=['datetime'])
     df.set_index('datetime', inplace=True)
@@ -80,9 +79,31 @@ if csv_file and model_file:
         trades_df['fees'] = trades_df[['brokerage', 'stt', 'exchange', 'gst', 'stamp', 'demat']].sum(axis=1)
         trades_df['net_pnl'] = trades_df['pnl'] - trades_df['fees']
 
-# Tab: Confidence Threshold Analysis
-    st.header("📊 Confidence Threshold Sensitivity Analysis")
-    if not trades_df.empty:
+    tabs = st.tabs(["Signals", "Charts", "Backtest", "Stats", "Insights"])
+
+    with tabs[0]:
+        st.subheader("📋 Executed Trades")
+        st.dataframe(trades_df)
+
+    with tabs[1]:
+        st.subheader("📈 Signal Chart")
+        if 'close' in df.columns:
+            fig, ax = plt.subplots(figsize=(12, 4))
+            ax.plot(df.index, df['close'], label='Price', color='gray')
+            ax.plot(df[df['signal'] == 1].index, df['close'][df['signal'] == 1], '^', color='green', label='Buy')
+            ax.plot(df[df['signal'] == -1].index, df['close'][df['signal'] == -1], 'v', color='red', label='Sell')
+            ax.legend()
+            st.pyplot(fig)
+
+    with tabs[2]:
+        st.subheader("📊 Backtest Performance")
+        trades_df['cumulative_pnl'] = trades_df['net_pnl'].cumsum()
+        trades_df['drawdown'] = trades_df['cumulative_pnl'] - trades_df['cumulative_pnl'].cummax()
+        st.line_chart(trades_df.set_index('exit_time')['cumulative_pnl'])
+        st.line_chart(trades_df.set_index('exit_time')['drawdown'])
+
+    with tabs[3]:
+        st.subheader("📊 Threshold Sensitivity")
         thresholds = np.arange(0.4, 0.91, 0.05)
         results = []
         for t in thresholds:
@@ -97,13 +118,12 @@ if csv_file and model_file:
         sens_df = pd.DataFrame(results, columns=["Threshold", "Signal Count", "Predicted Match", "Avg Confidence", "Gross PnL"])
         st.dataframe(sens_df.set_index("Threshold"))
 
-# Tab: Stats
-    st.header("📈 Stats")
-    if not trades_df.empty:
-        sharpe = trades_df['net_pnl'].mean() / trades_df['net_pnl'].std() * np.sqrt(252) if trades_df['net_pnl'].std() > 0 else 0
-        col1, col2, col3, col4, col5 = st.columns(5)
-        col1.metric("Gross PnL", f"{trades_df['pnl'].sum():.2f}")
-        col2.metric("Net PnL", f"{trades_df['net_pnl'].sum():.2f}")
-        col3.metric("Total Fees", f"{trades_df['fees'].sum():.2f}")
-        col4.metric("Sharpe Ratio", f"{sharpe:.2f}")
-        col5.metric("Trades", f"{len(trades_df)}")
+    with tabs[4]:
+        st.subheader("📉 Model Insights")
+        y_true = df['predicted_label']
+        y_pred = model.predict(X)
+        cm = confusion_matrix(y_true, y_pred, labels=model.classes_)
+        fig, ax = plt.subplots()
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=model.classes_)
+        disp.plot(ax=ax)
+        st.pyplot(fig)
