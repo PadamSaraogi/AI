@@ -105,6 +105,7 @@ if csv_file and model_file:
             total_trades = len(trades_df)
             profitable = (trades_df['net_pnl'] > 0).sum()
             win_rate = profitable / total_trades * 100
+            avg_duration = trades_df['duration_min'].mean()
             total_fees = trades_df['fees'].sum()
             gross_pnl = trades_df['pnl'].sum()
             net_pnl = trades_df['net_pnl'].sum()
