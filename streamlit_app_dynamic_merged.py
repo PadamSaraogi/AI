@@ -102,7 +102,7 @@ if csv_file and model_file:
 
     with tabs[1]:
         st.subheader("📈 Price with Signal Overlay")
-    if 'close' in df.columns:
+        if 'close' in df.columns:
         fig, ax = plt.subplots(figsize=(12, 4))
         ax.plot(df.index, df['close'], label='Price', color='gray')
         ax.plot(df[df['signal'] == 1].index, df['close'][df['signal'] == 1], '^', color='green', label='Buy')
@@ -110,60 +110,60 @@ if csv_file and model_file:
         ax.legend()
         st.pyplot(fig)
 
-    # Signal Overlay Heatmap
-    st.subheader("🟢 Signal Overlay Heatmap")
-    heatmap_df = df.copy()
-    heatmap_df['signal_int'] = df['signal'].map({1: 1, -1: -1, 0: 0})
-    fig2, ax2 = plt.subplots(figsize=(12, 1))
-    ax2.imshow([heatmap_df['signal_int']], aspect='auto', cmap='bwr', extent=[0, len(heatmap_df), -1, 1])
-    ax2.set_yticks([])
-    ax2.set_xticks([])
-    st.pyplot(fig2)
-
-    st.subheader("📊 Cumulative Return %: Strategy vs Buy & Hold")
-
-    # Calculate strategy and buy-hold cumulative returns
-    df['strategy_return'] = df['signal'].shift(1) * df['close'].pct_change()
-    df['cumulative_strategy'] = (1 + df['strategy_return'].fillna(0)).cumprod()
-    df['cumulative_hold'] = df['close'] / df['close'].iloc[0]
-
-    # Convert to percentage
-    df['cumulative_strategy_pct'] = (df['cumulative_strategy'] - 1) * 100
-    df['cumulative_hold_pct'] = (df['cumulative_hold'] - 1) * 100
-
-    # Plot
-    fig, ax = plt.subplots(figsize=(12, 4))
-    ax.plot(df.index, df['cumulative_strategy_pct'], label='Strategy', color='green')
-    ax.plot(df.index, df['cumulative_hold_pct'], label='Buy & Hold', color='blue')
-    ax.set_ylabel("Cumulative Return (%)")
-    ax.set_title("Cumulative Return %: Strategy vs Buy & Hold")
-    ax.legend()
-    st.pyplot(fig)
-
-
-    # Volatility Chart (ATR)
-    st.subheader("🌪 ATR (Volatility)")
-    if 'ATR' in df.columns:
-        st.line_chart(df['ATR'])
-
-    # Drawdown Curve
-    st.subheader("📉 Strategy Drawdown")
-    drawdown = df['cumulative_strategy'] - df['cumulative_strategy'].cummax()
-    st.line_chart(drawdown)
-
-    # Signal Frequency by Hour
-st.subheader("🕒 Signal Frequency by Hour")
-if 'signal' in df.columns:
-    df_signals = df[df['signal'] != 0].copy()
-    df_signals['hour'] = df_signals.index.hour
-    hourly_signals = df_signals.groupby('hour')['signal'].count()
-    st.bar_chart(hourly_signals)
-
-    # Rolling Sharpe Ratio (Advanced)
-    st.subheader("📐 Rolling Sharpe Ratio (30-period)")
-    rolling_sharpe = df['strategy_return'].rolling(30).mean() / df['strategy_return'].rolling(30).std()
-    st.line_chart(rolling_sharpe)
-
+        # Signal Overlay Heatmap
+        st.subheader("🟢 Signal Overlay Heatmap")
+        heatmap_df = df.copy()
+        heatmap_df['signal_int'] = df['signal'].map({1: 1, -1: -1, 0: 0})
+        fig2, ax2 = plt.subplots(figsize=(12, 1))
+        ax2.imshow([heatmap_df['signal_int']], aspect='auto', cmap='bwr', extent=[0, len(heatmap_df), -1, 1])
+        ax2.set_yticks([])
+        ax2.set_xticks([])
+        st.pyplot(fig2)
+    
+        st.subheader("📊 Cumulative Return %: Strategy vs Buy & Hold")
+    
+        # Calculate strategy and buy-hold cumulative returns
+        df['strategy_return'] = df['signal'].shift(1) * df['close'].pct_change()
+        df['cumulative_strategy'] = (1 + df['strategy_return'].fillna(0)).cumprod()
+        df['cumulative_hold'] = df['close'] / df['close'].iloc[0]
+    
+        # Convert to percentage
+        df['cumulative_strategy_pct'] = (df['cumulative_strategy'] - 1) * 100
+        df['cumulative_hold_pct'] = (df['cumulative_hold'] - 1) * 100
+    
+        # Plot
+        fig, ax = plt.subplots(figsize=(12, 4))
+        ax.plot(df.index, df['cumulative_strategy_pct'], label='Strategy', color='green')
+        ax.plot(df.index, df['cumulative_hold_pct'], label='Buy & Hold', color='blue')
+        ax.set_ylabel("Cumulative Return (%)")
+        ax.set_title("Cumulative Return %: Strategy vs Buy & Hold")
+        ax.legend()
+        st.pyplot(fig)
+    
+    
+        # Volatility Chart (ATR)
+        st.subheader("🌪 ATR (Volatility)")
+        if 'ATR' in df.columns:
+            st.line_chart(df['ATR'])
+    
+        # Drawdown Curve
+        st.subheader("📉 Strategy Drawdown")
+        drawdown = df['cumulative_strategy'] - df['cumulative_strategy'].cummax()
+        st.line_chart(drawdown)
+    
+        # Signal Frequency by Hour
+        st.subheader("🕒 Signal Frequency by Hour")
+        if 'signal' in df.columns:
+        df_signals = df[df['signal'] != 0].copy()
+        df_signals['hour'] = df_signals.index.hour
+        hourly_signals = df_signals.groupby('hour')['signal'].count()
+        st.bar_chart(hourly_signals)
+    
+        # Rolling Sharpe Ratio (Advanced)
+        st.subheader("📐 Rolling Sharpe Ratio (30-period)")
+        rolling_sharpe = df['strategy_return'].rolling(30).mean() / df['strategy_return'].rolling(30).std()
+        st.line_chart(rolling_sharpe)
+    
 
     with tabs[2]:
         st.subheader("📊 Backtest Performance")
