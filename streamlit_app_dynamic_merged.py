@@ -154,7 +154,7 @@ if csv_file and model_file:
         # Signal Frequency by Hour
         st.subheader("🕒 Signal Frequency by Hour")
         if 'signal' in df.columns:
-        df_signals = df[df['signal'] != 0].copy()
+            df_signals = df[df['signal'] != 0].copy()
         df_signals['hour'] = df_signals.index.hour
         hourly_signals = df_signals.groupby('hour')['signal'].count()
         st.bar_chart(hourly_signals)
