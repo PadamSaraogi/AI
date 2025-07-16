@@ -138,7 +138,7 @@ if csv_file and model_file:
             for t in thresholds:
                 sub = df[(df['confidence'] >= t) & (df['expected_pnl'] > 0)]
                 signal_count = len(sub)
-                wins = sum(sub['predicted_label'] == df['predicted_label'])  # proxy win
+                wins = (sub['predicted_label'] == sub['signal']).sum() if 'signal' in sub.columns else 0
                 avg_conf = sub['confidence'].mean() if not sub.empty else 0
                 sub_trades = trades_df[df['confidence'] >= t]
                 gross_pnl = sub_trades['pnl'].sum() if not sub_trades.empty else 0
