@@ -118,7 +118,7 @@ if csv_file and model_file:
             col5.metric("Net PnL", f"{net_pnl:.2f}")
             col6.metric("Total Fees", f"{total_fees:.2f}")
 
-         st.subheader("🧰 Trade Filters")
+        st.subheader("🧰 Trade Filters")
         with st.expander("🔍 Filter Options"):
             trade_type_filter = st.selectbox("Trade Type", options=["All", "Buy", "Sell"])
             daytrade_only = st.checkbox("Show only Intraday Trades", value=False)
