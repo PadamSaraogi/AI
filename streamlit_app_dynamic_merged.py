@@ -103,7 +103,7 @@ if csv_file and model_file:
     with tabs[1]:
         st.subheader("📈 Price with Signal Overlay")
         if 'close' in df.columns:
-        fig, ax = plt.subplots(figsize=(12, 4))
+            fig, ax = plt.subplots(figsize=(12, 4))
         ax.plot(df.index, df['close'], label='Price', color='gray')
         ax.plot(df[df['signal'] == 1].index, df['close'][df['signal'] == 1], '^', color='green', label='Buy')
         ax.plot(df[df['signal'] == -1].index, df['close'][df['signal'] == -1], 'v', color='red', label='Sell')
