@@ -131,6 +131,26 @@ if csv_file and model_file:
             st.pyplot(fig3)
 
     with tabs[3]:
+        st.subheader("📊 Confidence Threshold Sensitivity Analysis")
+        if not trades_df.empty:
+            thresholds = np.arange(0.4, 0.91, 0.05)
+            results = []
+            for t in thresholds:
+                sub = df[(df['confidence'] >= t) & (df['expected_pnl'] > 0)]
+                signal_count = len(sub)
+                wins = sum(sub['predicted_label'] == df['predicted_label'])  # proxy win
+                avg_conf = sub['confidence'].mean() if not sub.empty else 0
+                results.append((t, signal_count, wins, avg_conf))
+
+                            gross_pnls = []
+                for t in thresholds:
+                    sub_trades = trades_df[df['confidence'] >= t]
+                    gross_pnls.append(sub_trades['pnl'].sum() if not sub_trades.empty else 0)
+                for i, pnl in enumerate(gross_pnls):
+                    results[i] += (pnl,)
+
+            sens_df = pd.DataFrame(results, columns=["Threshold", "Signal Count", "Predicted Match", "Avg Confidence", "Gross PnL"])
+            st.dataframe(sens_df.set_index("Threshold"))
         st.subheader("📈 Stats")
         if not trades_df.empty:
             sharpe = trades_df['net_pnl'].mean() / trades_df['net_pnl'].std() * np.sqrt(252) if trades_df['net_pnl'].std() > 0 else 0
