@@ -100,6 +100,62 @@ if csv_file and model_file:
         if not trades_df.empty:
             st.dataframe(trades_df)
 
+        st.subheader("📊 Trade Summary Stats")
+        if not trades_df.empty:
+            total_trades = len(trades_df)
+            profitable = (trades_df['net_pnl'] > 0).sum()
+            win_rate = profitable / total_trades * 100
+            avg_duration = trades_df['duration_min'].mean()
+            total_fees = trades_df['fees'].sum()
+            gross_pnl = trades_df['pnl'].sum()
+            net_pnl = trades_df['net_pnl'].sum()
+        
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
+            col1.metric("Total Trades", total_trades)
+            col2.metric("Win Rate", f"{win_rate:.1f}%")
+            col3.metric("Avg Duration", f"{avg_duration:.1f} min")
+            col4.metric("Gross PnL", f"{gross_pnl:.2f}")
+            col5.metric("Net PnL", f"{net_pnl:.2f}")
+            col6.metric("Total Fees", f"{total_fees:.2f}")
+
+         st.subheader("🧰 Trade Filters")
+        with st.expander("🔍 Filter Options"):
+            trade_type_filter = st.selectbox("Trade Type", options=["All", "Buy", "Sell"])
+            daytrade_only = st.checkbox("Show only Intraday Trades", value=False)
+        
+            filtered_df = trades_df.copy()
+            if trade_type_filter != "All":
+                filtered_df = filtered_df[filtered_df['trade_type'] == trade_type_filter]
+            if daytrade_only:
+                filtered_df = filtered_df[filtered_df['day_trade']]
+
+        st.subheader("📋 Executed Trades – Detailed Breakdown")
+    
+    # Half and final PnL
+    filtered_df['pnl_half'] = np.where(filtered_df['tp1_hit'],
+                                       0.5 * (filtered_df['tp1_exit_price'] - filtered_df['entry_price']),
+                                       0.0)
+    filtered_df['pnl_final'] = np.where(filtered_df['tp1_hit'],
+                                        0.5 * (filtered_df['final_exit_price'] - filtered_df['entry_price']),
+                                        filtered_df['final_exit_price'] - filtered_df['entry_price'])
+    
+    display_cols = filtered_df[[
+        'entry_time', 'exit_time', 'entry_price', 'tp1_exit_price', 'final_exit_price',
+        'pnl_half', 'pnl_final', 'pnl', 'fees', 'net_pnl',
+        'brokerage', 'stt', 'exchange', 'gst', 'stamp', 'demat',
+        'trade_type', 'day_trade', 'duration_min'
+    ]]
+    
+    st.dataframe(display_cols.style.format({
+        'entry_price': '{:.2f}', 'tp1_exit_price': '{:.2f}', 'final_exit_price': '{:.2f}',
+        'pnl_half': '{:+.2f}', 'pnl_final': '{:+.2f}', 'pnl': '{:+.2f}',
+        'fees': '{:.2f}', 'net_pnl': '{:+.2f}', 'duration_min': '{:.1f}',
+        'brokerage': '{:.2f}', 'stt': '{:.2f}', 'exchange': '{:.2f}',
+        'gst': '{:.2f}', 'stamp': '{:.2f}', 'demat': '{:.2f}'
+    }))
+
+
+
     with tabs[1]:
         st.subheader("📈 Price with Signal Overlay")
         if 'close' in df.columns:
