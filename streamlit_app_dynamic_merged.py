@@ -109,16 +109,6 @@ if csv_file and model_file:
         ax.plot(df[df['signal'] == -1].index, df['close'][df['signal'] == -1], 'v', color='red', label='Sell')
         ax.legend()
         st.pyplot(fig)
-
-        # Signal Overlay Heatmap
-        st.subheader("🟢 Signal Overlay Heatmap")
-        heatmap_df = df.copy()
-        heatmap_df['signal_int'] = df['signal'].map({1: 1, -1: -1, 0: 0})
-        fig2, ax2 = plt.subplots(figsize=(12, 1))
-        ax2.imshow([heatmap_df['signal_int']], aspect='auto', cmap='bwr', extent=[0, len(heatmap_df), -1, 1])
-        ax2.set_yticks([])
-        ax2.set_xticks([])
-        st.pyplot(fig2)
     
         st.subheader("📊 Cumulative Return %: Strategy vs Buy & Hold")
     
