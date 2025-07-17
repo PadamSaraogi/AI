@@ -35,7 +35,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
 
         # If already in trade, manage the trade
         if in_trade:
-            duration = i - entry_idx  # Calculate trade duration in bars (this is intraday)
+            duration = i - entry_idx  # Calculate trade duration in bars
             price_now = price
             atr_now = atr
 
@@ -51,7 +51,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
             hit_exit = (
                 (entry_sig > 0 and (price_now <= stop_price or price_now >= tp_full or price_now <= trailing_stop)) or
                 (entry_sig < 0 and (price_now >= stop_price or price_now <= tp_full or price_now >= trailing_stop)) or
-                duration >= time_limit  # Limit to intraday (same day)
+                duration >= time_limit
             )
 
             # If exit condition is met, close the trade
@@ -61,8 +61,8 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
 
                 total_pnl = pnl_full  # Since we're not tracking half-exit, total PnL is just full exit
 
-                # Calculate intraday fees (this can be customized, depending on your fee model)
-                fees = 0  # Set fees to 0 for now (calculate according to your fee structure)
+                # Calculate fees (this can be customized, depending on your fee model)
+                fees = 0  # For simplicity, set fees to 0 here or add logic to compute fees
 
                 net_pnl = total_pnl - fees  # Calculate net profit/loss after fees
 
@@ -77,7 +77,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                     'net_pnl': net_pnl,  # Add net PnL
                     'pnl': total_pnl,
                     'trade_type': 'Buy' if entry_sig == 1 else 'Short Sell',
-                    'duration_min': duration  # Add the duration in minutes (intraday)
+                    'duration_min': duration  # Add the duration in minutes
                 })
 
                 # Reset trade variables for next trade
@@ -142,5 +142,3 @@ if csv_file:
         ax2.set_xlabel("Duration (minutes)")
         ax2.set_ylabel("Frequency")
         st.pyplot(fig2)
-else:
-    st.warning("Please upload the necessary CSV files to proceed with the backtest.")
