@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2.5):
     trades = []  # Store trade information
@@ -61,11 +62,6 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
 
                 total_pnl = pnl_full  # Since we're not tracking half-exit, total PnL is just full exit
 
-                # Calculate fees (this can be customized, depending on your fee model)
-                fees = 0  # For simplicity, set fees to 0 here or add logic to compute fees
-
-                net_pnl = total_pnl - fees  # Calculate net profit/loss after fees
-
                 # Store trade data
                 trades.append({
                     'entry_time': df.index[entry_idx],
@@ -73,11 +69,8 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                     'entry_price': entry_price,
                     'final_exit_price': final_exit_price,
                     'pnl_final': pnl_full,
-                    'fees': fees,
-                    'net_pnl': net_pnl,  # Add net PnL
                     'pnl': total_pnl,
-                    'trade_type': 'Buy' if entry_sig == 1 else 'Short Sell',
-                    'duration_min': duration  # Add the duration in minutes
+                    'trade_type': 'Buy' if entry_sig == 1 else 'Short Sell'
                 })
 
                 # Reset trade variables for next trade
@@ -86,59 +79,38 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
 
     return trades
 
-# === Streamlit: Correct File Upload Handling ===
-import streamlit as st
+# === Loading the Enhanced Signal Data (CSV File) ===
+file_path = "5m_signals_enhanced_<STOCK>.csv"  # Update this with the correct path
+df = pd.read_csv(file_path, parse_dates=['datetime'])
+df.set_index('datetime', inplace=True)
 
-# File Upload Section
-csv_file = st.file_uploader("📂 Upload `5m_signals_enhanced_<STOCK>.csv`", type="csv")
-if csv_file:
-    # Read the uploaded file (csv_file is a BytesIO object)
-    df = pd.read_csv(csv_file, parse_dates=['datetime'])
-    df.set_index('datetime', inplace=True)
+# === Running the Backtest Simulation ===
+trades = run_backtest_simulation(df)
 
-    st.write(f"### Enhanced Signals Data (First 5 rows):")
-    st.write(df.head())  # Display the first 5 rows for preview
+# === Convert Trades Data into DataFrame for Analysis ===
+trades_df = pd.DataFrame(trades)
 
-    # Run backtest using the enhanced signal data
-    trades = run_backtest_simulation(df)
+# === Performance Summary: Calculate Key Metrics ===
+if not trades_df.empty:
+    total_trades = len(trades_df)
+    profitable_trades = (trades_df['pnl'] > 0).sum()
+    win_rate = (profitable_trades / total_trades) * 100
+    avg_pnl = trades_df['pnl'].mean()
+    total_fees = trades_df['fees'].sum() if 'fees' in trades_df.columns else 0
 
-    # Convert trades into DataFrame for analysis
-    trades_df = pd.DataFrame(trades)
+    print(f"Total Trades: {total_trades}")
+    print(f"Win Rate: {win_rate:.2f}%")
+    print(f"Avg Net PnL per Trade: {avg_pnl:.2f}")
+    print(f"Total Fees: {total_fees:.2f}")
 
-    # Show Backtest Results
-    if not trades_df.empty:
-        st.write(f"Total Trades: {len(trades_df)}")
-        st.write("### Trade Details")
-        st.dataframe(trades_df)
-
-    # === Performance Summary: Display Key Metrics ===
-    if not trades_df.empty:
-        total_trades = len(trades_df)
-        profitable_trades = (trades_df['pnl'] > 0).sum()
-        win_rate = (profitable_trades / total_trades) * 100
-        avg_pnl = trades_df['pnl'].mean()
-        total_fees = trades_df['fees'].sum() if 'fees' in trades_df.columns else 0
-
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        col1.metric("Total Trades", total_trades)
-        col2.metric("Win Rate", f"{win_rate:.2f}%")
-        col3.metric("Avg Duration", f"{trades_df['duration_min'].mean():.1f} min")
-        col4.metric("Gross PnL", f"{trades_df['pnl'].sum():.2f}")
-        col5.metric("Net PnL", f"{trades_df['net_pnl'].sum():.2f}")
-        col6.metric("Total Fees", f"{total_fees:.2f}")
-
-    # === Cumulative PnL Chart ===
-    if not trades_df.empty:
-        trades_df['cumulative_pnl'] = trades_df['pnl'].cumsum()
-        st.subheader("📉 Cumulative PnL Over Time")
-        st.line_chart(trades_df.set_index('exit_time')['cumulative_pnl'])
-
-    # === Trade Duration Histogram ===
-    if not trades_df.empty:
-        st.subheader("📊 Trade Duration Histogram")
-        fig2, ax2 = plt.subplots(figsize=(10, 6))
-        ax2.hist(trades_df['duration_min'], bins=30, color='skyblue', edgecolor='black')
-        ax2.set_title("Trade Duration (Minutes)")
-        ax2.set_xlabel("Duration (minutes)")
-        ax2.set_ylabel("Frequency")
-        st.pyplot(fig2)
+# === Plot Cumulative PnL Over Time ===
+if not trades_df.empty:
+    trades_df['cumulative_pnl'] = trades_df['pnl'].cumsum()
+    plt.figure(figsize=(12, 6))
+    plt.plot(trades_df.index, trades_df['cumulative_pnl'], label='Cumulative PnL')
+    plt.title('Cumulative PnL Over Time')
+    plt.xlabel('Time')
+    plt.ylabel('Cumulative PnL')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
