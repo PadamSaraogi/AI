@@ -5,7 +5,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
     trades = []  # Store trade information
     in_trade = False  # Flag to check if we are in a trade
     cooldown = 0  # Cooldown period after each trade
-    COOLDOWN_BARS = 2  # Number of bars to wait before entering a new trade
+    COOLDOWN_BARS = 1  # Reduce cooldown for testing
     STOP_MULT = 1.0  # Stop loss multiplier based on ATR (Average True Range)
 
     # Set the exit time (3:25 PM) and re-entry time (9:05 AM)
@@ -35,9 +35,13 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
         trade_time = df.index[i].time()  # Get the time part of the timestamp
         trade_date = df.index[i].date()
 
+        # Debugging: Print signal data and time
+        st.write(f"Signal: {sig}, Trade Date: {trade_date}, Trade Time: {trade_time}")
+
         # If there is an open trade from the previous day, re-enter at the start of the next day
         if last_trade_exit and trade_time >= REENTER_TIME and trade_date > last_trade_exit.date():
             # Re-enter the trade at 9:05 AM
+            st.write(f"Re-entering trade on {trade_date} at {trade_time}")
             entry_price = price
             entry_sig = sig
             stop_price = entry_price - STOP_MULT * atr * entry_sig  # Stop loss
@@ -104,7 +108,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                     'pnl_final': pnl_full,
                     'fees': fees,
                     'net_pnl': net_pnl,  # Add net PnL
-                    'pnl': total_pnl,
+                    'pnl': total_pn,
                     'trade_type': 'Buy' if entry_sig == 1 else 'Short Sell',
                     'duration_min': duration  # Add duration in minutes
                 })
