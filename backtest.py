@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 
-def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2.5):
+def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2.5, STOP_MULT=1.0):
     trades = []  # Store trade information
     in_trade = False  # Flag to check if we are in a trade
     current_trade = None  # To store data for the ongoing trade
