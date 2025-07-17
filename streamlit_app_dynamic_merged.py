@@ -42,7 +42,7 @@ else:
 tabs = st.tabs(["Signals", "Backtest", "Performance", "Optimization", "Duration Histogram"])
 
 with tabs[0]:  # Signals Tab
-    st.subheader("### Enhanced Signals Data")
+    st.subheader("Enhanced Signals Data")
 
     # Filter Data for Time Range Selection (Optional)
     min_date = df_signals.index.min().date()  # Convert to date
@@ -60,11 +60,11 @@ with tabs[0]:  # Signals Tab
                              (df_signals.index.date <= selected_date_range[1])]
 
     # Display Signal Data Table with Filtering and Sorting
-    st.write("### Filtered Signal Data")
+    st.write("Filtered Signal Data")
     st.dataframe(df_filtered[['predicted_label', 'confidence', 'signal', 'position']])
 
     # === Signal Heatmap Visualization ===
-    st.subheader("### Signal Confidence Heatmap")
+    st.subheader("Signal Confidence Heatmap")
     signal_matrix = df_filtered[['predicted_label', 'confidence', 'signal']].pivot_table(
         values='confidence', index='predicted_label', columns='signal', aggfunc='mean'
     )
@@ -73,7 +73,7 @@ with tabs[0]:  # Signals Tab
     st.plotly_chart(fig_heatmap)
 
     # === Signal Distribution Visualization ===
-    st.subheader("### Signal Distribution")
+    st.subheader("Signal Distribution")
     fig_signal_dist = px.histogram(df_filtered, x="signal", color="signal",
                                    title="Signal Distribution (Buy, Sell, Hold)")
     st.plotly_chart(fig_signal_dist)
@@ -91,15 +91,15 @@ with tabs[0]:  # Signals Tab
 
 # Remaining tabs (Backtest, Performance, Optimization, Duration Histogram)
 with tabs[1]:  # Backtest Tab
-    st.subheader("### Backtest Results")
+    st.subheader("Backtest Results")
     # Add your backtest code here
 
 with tabs[2]:  # Performance Tab
-    st.subheader("### Performance Metrics")
+    st.subheader("Performance Metrics")
     # Add performance summary or charts here
 
 with tabs[3]:  # Optimization Tab
-    st.subheader("### Optimization Results")
+    st.subheader("Optimization Results")
     # Add optimization results here
 
 with tabs[4]:  # Duration Histogram Tab
