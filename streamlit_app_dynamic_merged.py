@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from backtest import run_backtest_simulation  # Ensure this import matches the file location
+from backtest import run_backtest_simulation  # Assuming backtest.py is in the same directory
 
 # === Streamlit Configuration ===
 st.set_page_config(layout="wide")
@@ -21,10 +21,6 @@ if csv_file and optimization_file:
 
     # Load the Optimization Results Data
     optimization_results = pd.read_csv(optimization_file)
-
-    # === Check the column names of the optimization file to prevent KeyError ===
-    st.write("### Optimization Results Columns:")
-    st.write(optimization_results.columns)  # Display the column names
 
     # === Backtest Simulation ===
     trades = run_backtest_simulation(df_signals)
@@ -72,7 +68,7 @@ if csv_file and optimization_file:
 
         st.subheader("📊 Win Rate vs Total PnL")
         fig, ax = plt.subplots(figsize=(10, 6))
-        ax.scatter(optimization_results['win_rate'], optimization_results['total_pnL'], color='blue')
+        ax.scatter(optimization_results['win_rate'], optimization_results['total_pnl'], color='blue')
         ax.set_title("Win Rate vs Total PnL")
         ax.set_xlabel("Win Rate (%)")
         ax.set_ylabel("Total PnL")
