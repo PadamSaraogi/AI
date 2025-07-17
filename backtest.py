@@ -1,3 +1,7 @@
+import pandas as pd  # Ensure this import is at the top of the file
+import numpy as np
+import matplotlib.pyplot as plt
+# Other imports, such as for backtest functions
 def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2.5):
     trades = []  # Store trade information
     in_trade = False  # Flag to check if we are in a trade
