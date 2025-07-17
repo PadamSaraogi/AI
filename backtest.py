@@ -1,20 +1,15 @@
-def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2.5, min_duration=5):
+import pandas as pd
+import numpy as np
+
+def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2.5):
     trades = []  # Store trade information
     in_trade = False  # Flag to check if we are in a trade
     cooldown = 0  # Cooldown period after each trade
     COOLDOWN_BARS = 2  # Number of bars to wait before entering a new trade
     STOP_MULT = 1.0  # Stop loss multiplier based on ATR (Average True Range)
 
-    # We will track the current date to ensure we don't open multiple trades within the same day
+    # We will track the current date to ensure the trade closes within the same day
     current_date = None
-    entry_price = None
-    entry_sig = None
-    stop_price = None
-    tp_full = None
-    trail_price = None
-    entry_idx = None
-    in_trade = False
-    last_trade_exit_time = None  # Track the time of last trade exit
 
     # Iterate through the signal dataframe
     for i in range(1, len(df)):
@@ -29,7 +24,6 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
         atr = df['ATR'].iat[i]
         adx = df['ADX14'].iat[i]
         trade_date = df.index[i].date()
-        trade_time = df.index[i].time()
 
         # If not already in trade and there's a signal (Buy or Sell)
         if not in_trade and sig != 0:
@@ -44,6 +38,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
             trail_price = entry_price  # Initial trailing stop
             in_trade = True
             entry_idx = i  # Store the entry index
+            pnl_full = 0.0  # Initialize profit/loss variable for full exit
             continue
 
         # If already in trade, manage the trade
@@ -67,13 +62,9 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                 duration >= time_limit  # Limit to intraday (same day)
             )
 
-            # Force exit at 3:20 PM (market close)
-            if trade_time >= pd.to_datetime("15:20:00").time():
-                hit_exit = True  # Exit the trade if the time is 3:20 PM or later
-
-            # Ensure a minimum trade duration (e.g., don't exit within the first 5 minutes)
-            if duration < min_duration:
-                hit_exit = False
+            # Force exit at the end of the day (i.e., market close)
+            if trade_date != current_date:
+                hit_exit = True  # Exit the trade if the date has changed (next day)
 
             # If exit condition is met, close the trade
             if hit_exit:
@@ -91,4 +82,77 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                 trades.append({
                     'entry_time': df.index[entry_idx],
                     'exit_time': df.index[i],
-                    'ent
+                    'entry_price': entry_price,
+                    'final_exit_price': final_exit_price,
+                    'pnl_final': pnl_full,
+                    'fees': fees,
+                    'net_pnl': net_pnl,  # Add net PnL
+                    'pnl': total_pnl,
+                    'trade_type': 'Buy' if entry_sig == 1 else 'Short Sell',
+                    'duration_min': duration  # Add the duration in minutes (intraday)
+                })
+
+                # Reset trade variables for next trade
+                in_trade = False
+                cooldown = COOLDOWN_BARS  # Set cooldown period
+
+    return trades
+
+# === Streamlit: Correct File Upload Handling ===
+import streamlit as st
+
+# File Upload Section
+csv_file = st.file_uploader("📂 Upload `5m_signals_enhanced_<STOCK>.csv`", type="csv")
+if csv_file:
+    # Read the uploaded file (csv_file is a BytesIO object)
+    df = pd.read_csv(csv_file, parse_dates=['datetime'])
+    df.set_index('datetime', inplace=True)
+
+    st.write(f"### Enhanced Signals Data (First 5 rows):")
+    st.write(df.head())  # Display the first 5 rows for preview
+
+    # Run backtest using the enhanced signal data
+    trades = run_backtest_simulation(df)
+
+    # Convert trades into DataFrame for analysis
+    trades_df = pd.DataFrame(trades)
+
+    # Show Backtest Results
+    if not trades_df.empty:
+        st.write(f"Total Trades: {len(trades_df)}")
+        st.write("### Trade Details")
+        st.dataframe(trades_df)
+
+    # === Performance Summary: Display Key Metrics ===
+    if not trades_df.empty:
+        total_trades = len(trades_df)
+        profitable_trades = (trades_df['pnl'] > 0).sum()
+        win_rate = (profitable_trades / total_trades) * 100
+        avg_pnl = trades_df['pnl'].mean()
+        total_fees = trades_df['fees'].sum() if 'fees' in trades_df.columns else 0
+
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1.metric("Total Trades", total_trades)
+        col2.metric("Win Rate", f"{win_rate:.2f}%")
+        col3.metric("Avg Duration", f"{trades_df['duration_min'].mean():.1f} min")
+        col4.metric("Gross PnL", f"{trades_df['pnl'].sum():.2f}")
+        col5.metric("Net PnL", f"{trades_df['net_pnl'].sum():.2f}")
+        col6.metric("Total Fees", f"{total_fees:.2f}")
+
+    # === Cumulative PnL Chart ===
+    if not trades_df.empty:
+        trades_df['cumulative_pnl'] = trades_df['pnl'].cumsum()
+        st.subheader("📉 Cumulative PnL Over Time")
+        st.line_chart(trades_df.set_index('exit_time')['cumulative_pnl'])
+
+    # === Trade Duration Histogram ===
+    if not trades_df.empty:
+        st.subheader("📊 Trade Duration Histogram")
+        fig2, ax2 = plt.subplots(figsize=(10, 6))
+        ax2.hist(trades_df['duration_min'], bins=30, color='skyblue', edgecolor='black')
+        ax2.set_title("Trade Duration (Minutes)")
+        ax2.set_xlabel("Duration (minutes)")
+        ax2.set_ylabel("Frequency")
+        st.pyplot(fig2)
+else:
+    st.warning("Please upload the necessary CSV files to proceed with the backtest.")
