@@ -39,20 +39,20 @@ if csv_file and optimization_file:
     with tabs[0]:
         st.subheader("### Enhanced Signals Data")
 
-    # Check column names in the uploaded file
-    st.write("Columns in the dataset:", df_signals.columns)
+    # Read the CSV file and set the first column as the datetime index
+    df_signals = pd.read_csv(csv_file, parse_dates=[0], index_col=0)
 
-    # Ensure the 'datetime' column is present
-    if 'datetime' in df_signals.columns:
-        # Convert the 'datetime' column to datetime format
-        df_signals['datetime'] = pd.to_datetime(df_signals['datetime'])
-    else:
-        st.error("The 'datetime' column is missing from the dataset. Please check your file.")
+    # Check the first few rows to verify the data is correctly loaded
+    st.write(df_signals.head())
+
+    # Ensure that the index is datetime
+    if not pd.api.types.is_datetime64_any_dtype(df_signals.index):
+        st.error("The first column is not being recognized as datetime. Please check your file.")
         st.stop()
 
     # Filter Data for Time Range Selection (Optional)
-    min_date = df_signals['datetime'].min().date()  # Convert to date
-    max_date = df_signals['datetime'].max().date()  # Convert to date
+    min_date = df_signals.index.min().date()  # Convert to date
+    max_date = df_signals.index.max().date()  # Convert to date
     selected_date_range = st.slider(
         "Select Date Range",
         min_value=min_date,
@@ -62,8 +62,8 @@ if csv_file and optimization_file:
     )
 
     # Filter the dataframe based on the selected date range
-    df_filtered = df_signals[(df_signals['datetime'].dt.date >= selected_date_range[0]) &
-                             (df_signals['datetime'].dt.date <= selected_date_range[1])]
+    df_filtered = df_signals[(df_signals.index.date >= selected_date_range[0]) &
+                             (df_signals.index.date <= selected_date_range[1])]
 
     # Display Signal Data Table with Filtering and Sorting
     st.dataframe(df_filtered[['predicted_label', 'confidence', 'signal', 'position']])
