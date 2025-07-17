@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import streamlit as st  # Import Streamlit
 
 def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2.5):
     trades = []  # Store trade information
@@ -108,7 +109,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                     'pnl_final': pnl_full,
                     'fees': fees,
                     'net_pnl': net_pnl,  # Add net PnL
-                    'pnl': total_pn,
+                    'pnl': total_pnl,
                     'trade_type': 'Buy' if entry_sig == 1 else 'Short Sell',
                     'duration_min': duration  # Add duration in minutes
                 })
