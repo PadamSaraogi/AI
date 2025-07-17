@@ -12,9 +12,8 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
     EXIT_TIME = pd.to_datetime("15:25:00").time()  # 15:25 in 24-hour format
     REENTER_TIME = pd.to_datetime("09:05:00").time()  # 09:05 AM in 24-hour format
 
-    # Store the trade entry details (to allow reopening the next day)
-    last_trade_entry = None
-    last_trade_exit = None
+    # Initialize trade exit tracker
+    last_trade_exit = None  # This will store the exit time of the last trade
     entry_price = None
     entry_sig = None
     stop_price = None
@@ -57,7 +56,6 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
             trail_price = entry_price  # Initial trailing stop
             in_trade = True
             entry_idx = i  # Store the entry index
-            last_trade_entry = trade_date  # Record the entry date for the next day
             continue
 
         # If already in trade, manage the trade
@@ -114,6 +112,6 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                 # Reset trade variables for the next trade
                 in_trade = False
                 cooldown = COOLDOWN_BARS  # Set cooldown period
-                last_trade_exit = trade_date  # Record the exit date
+                last_trade_exit = df.index[i]  # Record the exit time of the current trade
 
     return trades
