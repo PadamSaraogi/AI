@@ -13,9 +13,6 @@ st.sidebar.header("Upload Files")
 csv_file = st.sidebar.file_uploader("📂 Upload `5m_signals_enhanced_<STOCK>.csv`", type="csv")
 optimization_file = st.sidebar.file_uploader("📂 Upload `grid_search_results_BEL.csv`", type="csv")
 
-# === Tabs Configuration ===
-tabs = st.selectbox("Select a Tab", ["Signals", "Backtest", "Performance", "Optimization", "Duration Histogram"])
-
 # === File Handling and Backtest ===
 if csv_file and optimization_file:
     # Load the Enhanced Signal Data
@@ -36,18 +33,20 @@ if csv_file and optimization_file:
     avg_pnl = trades_df['pnl'].mean()
     total_fees = trades_df['fees'].sum() if 'fees' in trades_df.columns else 0
 
-    # === Display Tabs Content ===
-    if tabs == "Signals":
+    # === Tabs Layout using `st.tabs()` ===
+    tabs = st.tabs(["Signals", "Backtest", "Performance", "Optimization", "Duration Histogram"])
+
+    with tabs[0]:
         st.subheader("### Enhanced Signals Data")
         st.write(df_signals[['predicted_label', 'confidence', 'signal', 'position']].head())
 
-    elif tabs == "Backtest":
+    with tabs[1]:
         if not trades_df.empty:
             st.subheader("### Backtest Results")
             st.write(f"Total Trades: {total_trades}")
             st.dataframe(trades_df)
 
-    elif tabs == "Performance":
+    with tabs[2]:
         if not trades_df.empty:
             col1, col2, col3, col4, col5, col6 = st.columns(6)
             col1.metric("Total Trades", total_trades)
@@ -61,7 +60,7 @@ if csv_file and optimization_file:
             trades_df['cumulative_pnl'] = trades_df['pnl'].cumsum()
             st.line_chart(trades_df.set_index('exit_time')['cumulative_pnl'])
 
-    elif tabs == "Optimization":
+    with tabs[3]:
         st.subheader("### Optimization Results")
         threshold_filter = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.5)
         filtered_results = optimization_results[optimization_results['ml_threshold'] >= threshold_filter]
@@ -76,7 +75,7 @@ if csv_file and optimization_file:
         ax.grid(True)
         st.pyplot(fig)
 
-    elif tabs == "Duration Histogram":
+    with tabs[4]:
         st.subheader("📊 Trade Duration Histogram")
         if not trades_df.empty:
             fig2, ax2 = plt.subplots(figsize=(10, 6))
