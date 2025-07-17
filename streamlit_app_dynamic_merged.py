@@ -39,8 +39,16 @@ if csv_file and optimization_file:
     with tabs[0]:
         st.subheader("### Enhanced Signals Data")
 
-    # Ensure the 'datetime' column is in datetime format
-    df_signals['datetime'] = pd.to_datetime(df_signals['datetime'])
+    # Check column names in the uploaded file
+    st.write("Columns in the dataset:", df_signals.columns)
+
+    # Ensure the 'datetime' column is present
+    if 'datetime' in df_signals.columns:
+        # Convert the 'datetime' column to datetime format
+        df_signals['datetime'] = pd.to_datetime(df_signals['datetime'])
+    else:
+        st.error("The 'datetime' column is missing from the dataset. Please check your file.")
+        st.stop()
 
     # Filter Data for Time Range Selection (Optional)
     min_date = df_signals['datetime'].min().date()  # Convert to date
