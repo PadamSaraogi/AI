@@ -1,8 +1,4 @@
-import pandas as pd  # Ensure this import is at the top of the file
-import numpy as np
-import matplotlib.pyplot as plt
-# Other imports, such as for backtest functions
-def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2.5):
+def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2.5, min_duration=5):
     trades = []  # Store trade information
     in_trade = False  # Flag to check if we are in a trade
     cooldown = 0  # Cooldown period after each trade
@@ -18,6 +14,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
     trail_price = None
     entry_idx = None
     in_trade = False
+    last_trade_exit_time = None  # Track the time of last trade exit
 
     # Iterate through the signal dataframe
     for i in range(1, len(df)):
@@ -74,6 +71,10 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
             if trade_time >= pd.to_datetime("15:20:00").time():
                 hit_exit = True  # Exit the trade if the time is 3:20 PM or later
 
+            # Ensure a minimum trade duration (e.g., don't exit within the first 5 minutes)
+            if duration < min_duration:
+                hit_exit = False
+
             # If exit condition is met, close the trade
             if hit_exit:
                 final_exit_price = price_now
@@ -90,22 +91,4 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                 trades.append({
                     'entry_time': df.index[entry_idx],
                     'exit_time': df.index[i],
-                    'entry_price': entry_price,
-                    'final_exit_price': final_exit_price,
-                    'pnl_final': pnl_full,
-                    'fees': fees,
-                    'net_pnl': net_pnl,  # Add net PnL
-                    'pnl': total_pnl,
-                    'trade_type': 'Buy' if entry_sig == 1 else 'Short Sell',
-                    'duration_min': duration  # Add the duration in minutes (intraday)
-                })
-
-                # Reset trade variables for next trade
-                in_trade = False
-                cooldown = COOLDOWN_BARS  # Set cooldown period
-
-            # If trade hasn't closed by 3:20 PM, carry over the position
-            if trade_time < pd.to_datetime("15:20:00").time():
-                continue  # Carry over the open trade to the next day without closing it
-
-    return trades
+                    'ent
