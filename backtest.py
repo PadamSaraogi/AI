@@ -8,8 +8,18 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
     COOLDOWN_BARS = 2  # Number of bars to wait before entering a new trade
     STOP_MULT = 1.0  # Stop loss multiplier based on ATR (Average True Range)
 
-    # Set the exit time (3:25 PM)
+    # Set the exit time (3:25 PM) and re-entry time (9:00 AM)
     EXIT_TIME = pd.to_datetime("15:25:00").time()  # 15:25 in 24-hour format
+    REENTER_TIME = pd.to_datetime("09:00:00").time()  # 09:00 AM in 24-hour format
+
+    # Initialize trade exit tracker
+    last_trade_exit = None  # This will store the exit time of the last trade
+    entry_price = None
+    entry_sig = None
+    stop_price = None
+    tp_full = None
+    trail_price = None
+    entry_idx = None
 
     # Iterate through the signal dataframe
     for i in range(1, len(df)):
@@ -24,6 +34,19 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
         atr = df['ATR'].iat[i]
         adx = df['ADX14'].iat[i]
         trade_time = df.index[i].time()  # Get the time part of the timestamp
+        trade_date = df.index[i].date()
+
+        # If there is an open trade from the previous day, re-enter at the start of the next day
+        if last_trade_exit and trade_time >= REENTER_TIME and trade_date > last_trade_exit.date():
+            # Re-enter the trade at 9:00 AM with the previous trade parameters
+            entry_price = price
+            entry_sig = sig
+            stop_price = entry_price - STOP_MULT * atr * entry_sig  # Stop loss
+            tp_full = entry_price + adx_target_mult * atr * entry_sig  # Full target price
+            trail_price = entry_price  # Initial trailing stop
+            in_trade = True
+            entry_idx = i  # Store the entry index
+            continue
 
         # If not already in trade and there's a signal (Buy or Sell)
         if not in_trade and sig != 0:
@@ -34,7 +57,6 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
             trail_price = entry_price  # Initial trailing stop
             in_trade = True
             entry_idx = i  # Store the entry index
-            pnl_full = 0.0  # Initialize profit/loss variable for full exit
             continue
 
         # If already in trade, manage the trade
@@ -85,11 +107,12 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                     'net_pnl': net_pnl,  # Add net PnL
                     'pnl': total_pnl,
                     'trade_type': 'Buy' if entry_sig == 1 else 'Short Sell',
-                    'duration_min': duration  # Add the duration in minutes (intraday)
+                    'duration_min': duration  # Add duration in minutes (intraday)
                 })
 
                 # Reset trade variables for next trade
                 in_trade = False
                 cooldown = COOLDOWN_BARS  # Set cooldown period
+                last_trade_exit = df.index[i]  # Record the exit time of the current trade
 
     return trades
