@@ -13,6 +13,12 @@ st.sidebar.header("Upload Files")
 csv_file = st.sidebar.file_uploader("📂 Upload `5m_signals_enhanced_<STOCK>.csv`", type="csv")
 optimization_file = st.sidebar.file_uploader("📂 Upload `grid_search_results_BEL.csv`", type="csv")
 
+# Sidebar Fee Input Section
+st.sidebar.header("Enter Fee Percentages")
+brokerage_fee = st.sidebar.number_input("Brokerage Fee (%)", min_value=0.0, max_value=100.0, value=0.1, step=0.01)
+transaction_fee = st.sidebar.number_input("Transaction Fee (%)", min_value=0.0, max_value=100.0, value=0.05, step=0.01)
+other_fee = st.sidebar.number_input("Other Fee (%)", min_value=0.0, max_value=100.0, value=0.02, step=0.01)
+
 # Handle CSV upload and backtest
 if csv_file and optimization_file:
     try:
@@ -24,7 +30,7 @@ if csv_file and optimization_file:
         optimization_results = pd.read_csv(optimization_file)
 
         # --- Backtest Simulation ---
-        trades = run_backtest_simulation(df_signals)
+        trades = run_backtest_simulation(df_signals, brokerage_fee, transaction_fee, other_fee)
         trades_df = pd.DataFrame(trades)
 
         # --- Performance Metrics ---
