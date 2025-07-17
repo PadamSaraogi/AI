@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import joblib
 from datetime import timedelta
 
 def run_backtest_simulation(df, trail_mult=2.0, time_limit=10, adx_target_mult=2.5):
@@ -151,9 +152,13 @@ input_file = '5m_signals_enhanced_BEL.csv'  # Path to the CSV data file
 model_file = 'trade_filter_model_BEL.pkl'  # Path to the trained model file
 features = ['ema_20', 'ema_50', 'ATR', 'ADX14', 'RSI', 'bb_width', 'volume_spike_ratio', 'return_1h', 'hour_of_day']
 
-# Load the trained model
-import joblib
-model = joblib.load(model_file)
+# Ensure the model file path is correct and accessible
+try:
+    model = joblib.load(model_file)
+    print("Model loaded successfully.")
+except FileNotFoundError as e:
+    print(f"Error loading model: {e}")
+    exit()
 
 # Run backtest
 backtest_results = backtest_strategy(input_file, model, features)
