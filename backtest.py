@@ -8,8 +8,8 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
     COOLDOWN_BARS = 2  # Number of bars to wait before entering a new trade
     STOP_MULT = 1.0  # Stop loss multiplier based on ATR (Average True Range)
 
-    # We will track the current date to ensure the trade closes within the same day
-    current_date = None
+    # Set the exit time (3:25 PM)
+    EXIT_TIME = pd.to_datetime("15:25:00").time()  # 15:25 in 24-hour format
 
     # Iterate through the signal dataframe
     for i in range(1, len(df)):
@@ -23,14 +23,10 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
         price = df['close'].iat[i]
         atr = df['ATR'].iat[i]
         adx = df['ADX14'].iat[i]
-        trade_date = df.index[i].date()
+        trade_time = df.index[i].time()  # Get the time part of the timestamp
 
         # If not already in trade and there's a signal (Buy or Sell)
         if not in_trade and sig != 0:
-            # Ensure that trades are initiated at the beginning of the day
-            if trade_date != current_date:
-                current_date = trade_date  # Update the current trade date
-
             entry_price = price
             entry_sig = sig
             stop_price = entry_price - STOP_MULT * atr * entry_sig  # Stop loss
@@ -43,7 +39,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
 
         # If already in trade, manage the trade
         if in_trade:
-            duration = i - entry_idx  # Calculate trade duration in bars (this is intraday)
+            duration = i - entry_idx  # Calculate trade duration in bars (intraday)
             price_now = price
             atr_now = atr
 
@@ -62,9 +58,9 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                 duration >= time_limit  # Limit to intraday (same day)
             )
 
-            # Force exit at the end of the day (market close)
-            if trade_date != current_date:
-                hit_exit = True  # Exit the trade if the date has changed (next day)
+            # Force exit at 3:25 PM (Exit Time)
+            if trade_time >= EXIT_TIME:
+                hit_exit = True  # Exit the trade at 3:25 PM
 
             # If exit condition is met, close the trade
             if hit_exit:
