@@ -37,10 +37,9 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
         # Debugging: Print signal data and time
         print(f"Signal: {sig}, Trade Date: {trade_date}, Trade Time: {trade_time}")
 
-        # If there is an open trade from the previous day, re-enter at the start of the next day
+        # If the previous trade has exited and it's time to re-enter (9:00 AM of the next day)
         if last_trade_exit and trade_time >= REENTER_TIME and trade_date > last_trade_exit.date():
-            # Ensure that the re-entry logic only happens once per day
-            if in_trade:
+            if not in_trade and sig != 0:  # Ensure we are not already in a trade
                 print(f"Re-entering trade on {trade_date} at {trade_time}, Last Exit: {last_trade_exit}")
                 entry_price = price
                 entry_sig = sig
@@ -115,7 +114,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                     'duration_min': duration  # Add duration in minutes (intraday)
                 })
 
-                # Reset trade variables for the next trade, but don't block multiple trades
+                # Reset trade variables for the next trade
                 in_trade = False
                 cooldown = COOLDOWN_BARS  # Set cooldown period
                 last_trade_exit = df.index[i]  # Record the exit time of the current trade
