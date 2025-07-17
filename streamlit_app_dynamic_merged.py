@@ -37,7 +37,7 @@ if csv_file and optimization_file:
     tabs = st.tabs(["Signals", "Backtest", "Performance", "Optimization", "Duration Histogram"])
 
     with tabs[0]:
-    st.subheader("Enhanced Signals Data")
+        st.subheader("Enhanced Signals Data")
 
     # Filter Data for Time Range Selection (Optional)
     min_date = df_signals.index.min()
