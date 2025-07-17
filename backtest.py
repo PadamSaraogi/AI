@@ -10,6 +10,13 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
 
     # We will track the current date to ensure the trade closes at 3:20 PM
     current_date = None
+    entry_price = None
+    entry_sig = None
+    stop_price = None
+    tp_full = None
+    trail_price = None
+    entry_idx = None
+    in_trade = False
 
     # Iterate through the signal dataframe
     for i in range(1, len(df)):
@@ -39,7 +46,6 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
             trail_price = entry_price  # Initial trailing stop
             in_trade = True
             entry_idx = i  # Store the entry index
-            pnl_full = 0.0  # Initialize profit/loss variable for full exit
             continue
 
         # If already in trade, manage the trade
@@ -64,7 +70,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
             )
 
             # Force exit at 3:20 PM (market close)
-            if trade_time >= pd.to_datetime("15:20:00").time():
+            if trade_time >= pd.to_datetime("15:25:00").time():
                 hit_exit = True  # Exit the trade if the time is 3:20 PM or later
 
             # If exit condition is met, close the trade
@@ -96,5 +102,9 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                 # Reset trade variables for next trade
                 in_trade = False
                 cooldown = COOLDOWN_BARS  # Set cooldown period
+
+            # If trade hasn't closed by 3:20 PM, carry over the position
+            if trade_time < pd.to_datetime("15:25:00").time():
+                continue  # Carry over the open trade to the next day without closing it
 
     return trades
