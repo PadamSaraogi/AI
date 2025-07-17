@@ -69,7 +69,8 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                     'final_exit_price': final_exit_price,
                     'pnl_final': pnl_full,
                     'pnl': total_pnl,
-                    'trade_type': 'Buy' if entry_sig == 1 else 'Short Sell'
+                    'trade_type': 'Buy' if entry_sig == 1 else 'Short Sell',
+                    'duration_min': duration  # Add the duration in minutes
                 })
 
                 # Reset trade variables for next trade
@@ -102,3 +103,35 @@ if csv_file:
         st.write(f"Total Trades: {len(trades_df)}")
         st.write("### Trade Details")
         st.dataframe(trades_df)
+
+    # === Performance Summary: Display Key Metrics ===
+    if not trades_df.empty:
+        total_trades = len(trades_df)
+        profitable_trades = (trades_df['pnl'] > 0).sum()
+        win_rate = (profitable_trades / total_trades) * 100
+        avg_pnl = trades_df['pnl'].mean()
+        total_fees = trades_df['fees'].sum() if 'fees' in trades_df.columns else 0
+
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1.metric("Total Trades", total_trades)
+        col2.metric("Win Rate", f"{win_rate:.2f}%")
+        col3.metric("Avg Duration", f"{trades_df['duration_min'].mean():.1f} min")
+        col4.metric("Gross PnL", f"{trades_df['pnl'].sum():.2f}")
+        col5.metric("Net PnL", f"{trades_df['net_pnl'].sum():.2f}")
+        col6.metric("Total Fees", f"{total_fees:.2f}")
+
+    # === Cumulative PnL Chart ===
+    if not trades_df.empty:
+        trades_df['cumulative_pnl'] = trades_df['pnl'].cumsum()
+        st.subheader("📉 Cumulative PnL Over Time")
+        st.line_chart(trades_df.set_index('exit_time')['cumulative_pnl'])
+
+    # === Trade Duration Histogram ===
+    if not trades_df.empty:
+        st.subheader("📊 Trade Duration Histogram")
+        fig2, ax2 = plt.subplots(figsize=(10, 6))
+        ax2.hist(trades_df['duration_min'], bins=30, color='skyblue', edgecolor='black')
+        ax2.set_title("Trade Duration (Minutes)")
+        ax2.set_xlabel("Duration (minutes)")
+        ax2.set_ylabel("Frequency")
+        st.pyplot(fig2)
