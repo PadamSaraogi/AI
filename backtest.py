@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import streamlit as st
 
 def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2.5):
     trades = []  # Store trade information
@@ -24,6 +25,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
         atr = df['ATR'].iat[i]
         adx = df['ADX14'].iat[i]
         trade_date = df.index[i].date()
+        trade_time = df.index[i]
 
         # If not already in trade and there's a signal (Buy or Sell)
         if not in_trade and sig != 0:
@@ -38,6 +40,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
             trail_price = entry_price  # Initial trailing stop
             in_trade = True
             entry_idx = i  # Store the entry index
+            entry_time = trade_time  # Store the actual entry time
             pnl_full = 0.0  # Initialize profit/loss variable for full exit
             continue
 
@@ -78,10 +81,13 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
 
                 net_pnl = total_pnl - fees  # Calculate net profit/loss after fees
 
+                # Calculate the actual duration of the trade in minutes
+                trade_duration_minutes = (trade_time - entry_time).total_seconds() / 60
+
                 # Store trade data
                 trades.append({
-                    'entry_time': df.index[entry_idx],
-                    'exit_time': df.index[i],
+                    'entry_time': entry_time,
+                    'exit_time': trade_time,
                     'entry_price': entry_price,
                     'final_exit_price': final_exit_price,
                     'pnl_final': pnl_full,
@@ -89,7 +95,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                     'net_pnl': net_pnl,  # Add net PnL
                     'pnl': total_pnl,
                     'trade_type': 'Buy' if entry_sig == 1 else 'Short Sell',
-                    'duration_min': duration  # Add the duration in minutes (intraday)
+                    'duration_min': trade_duration_minutes  # Add the actual duration in minutes
                 })
 
                 # Reset trade variables for next trade
