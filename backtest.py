@@ -39,16 +39,17 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
 
         # If there is an open trade from the previous day, re-enter at the start of the next day
         if last_trade_exit and trade_time >= REENTER_TIME and trade_date > last_trade_exit.date():
-            # Debugging: Check re-entry condition
-            print(f"Re-entering trade on {trade_date} at {trade_time}, Last Exit: {last_trade_exit}")
-            entry_price = price
-            entry_sig = sig
-            stop_price = entry_price - STOP_MULT * atr * entry_sig  # Stop loss
-            tp_full = entry_price + adx_target_mult * atr * entry_sig  # Full target price
-            trail_price = entry_price  # Initial trailing stop
-            in_trade = True
-            entry_idx = i  # Store the entry index
-            continue
+            # Ensure that the re-entry logic only happens once per day
+            if in_trade:
+                print(f"Re-entering trade on {trade_date} at {trade_time}, Last Exit: {last_trade_exit}")
+                entry_price = price
+                entry_sig = sig
+                stop_price = entry_price - STOP_MULT * atr * entry_sig  # Stop loss
+                tp_full = entry_price + adx_target_mult * atr * entry_sig  # Full target price
+                trail_price = entry_price  # Initial trailing stop
+                in_trade = True
+                entry_idx = i  # Store the entry index
+                continue
 
         # If not already in trade and there's a signal (Buy or Sell)
         if not in_trade and sig != 0:
