@@ -1,54 +1,48 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from backtest import run_backtest_simulation  # Assuming backtest.py is in the same directory
+import plotly.express as px
 
 # === Streamlit Configuration ===
 st.set_page_config(layout="wide")
-st.title("📈 Trading Signal Dashboard")
+st.title("📊 Trading Signal Dashboard")
 
 # === File Upload Section ===
 st.sidebar.header("Upload Files")
 csv_file = st.sidebar.file_uploader("📂 Upload `5m_signals_enhanced_<STOCK>.csv`", type="csv")
-optimization_file = st.sidebar.file_uploader("📂 Upload `grid_search_results_BEL.csv`", type="csv")
 
-# === File Handling and Backtest ===
-if csv_file and optimization_file:
-    # Load the Enhanced Signal Data
-    df_signals = pd.read_csv(csv_file, parse_dates=['datetime'])
-    df_signals.set_index('datetime', inplace=True)
+# Check if file is uploaded and not empty
+if csv_file is not None:
+    try:
+        # Check if file content is not empty
+        if not csv_file.getvalue().strip():
+            st.error("The uploaded file is empty. Please upload a valid file.")
+            st.stop()
 
-    # Load the Optimization Results Data
-    optimization_results = pd.read_csv(optimization_file)
+        # Try reading the CSV with the first column as datetime and setting it as the index
+        df_signals = pd.read_csv(csv_file, parse_dates=[0], index_col=0)
 
-    # === Backtest Simulation ===
-    trades = run_backtest_simulation(df_signals)
-    trades_df = pd.DataFrame(trades)
+        # Check the first few rows to verify the data
+        st.write("First few rows of the uploaded dataset:", df_signals.head())
 
-    # === Performance Summary: Display Key Metrics ===
-    total_trades = len(trades_df)
-    profitable_trades = (trades_df['pnl'] > 0).sum()
-    win_rate = (profitable_trades / total_trades) * 100
-    avg_pnl = trades_df['pnl'].mean()
-    total_fees = trades_df['fees'].sum() if 'fees' in trades_df.columns else 0
+        # Ensure datetime column is in datetime format
+        if not pd.api.types.is_datetime64_any_dtype(df_signals.index):
+            st.error("The first column is not being recognized as datetime. Please check your file.")
+            st.stop()
 
-    # === Tabs Layout using `st.tabs()` ===
-    tabs = st.tabs(["Signals", "Backtest", "Performance", "Optimization", "Duration Histogram"])
-
-    with tabs[0]:
-        st.subheader("### Enhanced Signals Data")
-
-    # Read the CSV file and set the first column as the datetime index
-    df_signals = pd.read_csv(csv_file, parse_dates=[0], index_col=0)
-
-    # Check the first few rows to verify the data is correctly loaded
-    st.write(df_signals.head())
-
-    # Ensure that the index is datetime
-    if not pd.api.types.is_datetime64_any_dtype(df_signals.index):
-        st.error("The first column is not being recognized as datetime. Please check your file.")
+    except pd.errors.EmptyDataError:
+        st.error("The uploaded CSV file is empty or does not contain valid data.")
         st.stop()
+    except Exception as e:
+        st.error(f"An error occurred while reading the file: {str(e)}")
+        st.stop()
+else:
+    st.warning("Please upload a CSV file to proceed.")
+
+# === Tabs Layout using `st.tabs()` ===
+tabs = st.tabs(["Signals", "Backtest", "Performance", "Optimization", "Duration Histogram"])
+
+with tabs[0]:  # Signals Tab
+    st.subheader("### Enhanced Signals Data")
 
     # Filter Data for Time Range Selection (Optional)
     min_date = df_signals.index.min().date()  # Convert to date
@@ -66,6 +60,7 @@ if csv_file and optimization_file:
                              (df_signals.index.date <= selected_date_range[1])]
 
     # Display Signal Data Table with Filtering and Sorting
+    st.write("### Filtered Signal Data")
     st.dataframe(df_filtered[['predicted_label', 'confidence', 'signal', 'position']])
 
     # === Signal Heatmap Visualization ===
@@ -94,50 +89,19 @@ if csv_file and optimization_file:
     st.write(f"Sell Signals: {sell_signals} ({(sell_signals / total_signals) * 100:.2f}%)")
     st.write(f"Hold Signals: {hold_signals} ({(hold_signals / total_signals) * 100:.2f}%)")
 
-    with tabs[1]:
-        if not trades_df.empty:
-            st.subheader("### Backtest Results")
-            st.write(f"Total Trades: {total_trades}")
-            st.dataframe(trades_df)
+# Remaining tabs (Backtest, Performance, Optimization, Duration Histogram)
+with tabs[1]:  # Backtest Tab
+    st.subheader("### Backtest Results")
+    # Add your backtest code here
 
-    with tabs[2]:
-        if not trades_df.empty:
-            col1, col2, col3, col4, col5, col6 = st.columns(6)
-            col1.metric("Total Trades", total_trades)
-            col2.metric("Win Rate", f"{win_rate:.2f}%")
-            col3.metric("Avg Duration", f"{trades_df['duration_min'].mean():.1f} min")
-            col4.metric("Gross PnL", f"{trades_df['pnl'].sum():.2f}")
-            col5.metric("Net PnL", f"{trades_df['net_pnl'].sum():.2f}")
-            col6.metric("Total Fees", f"{total_fees:.2f}")
+with tabs[2]:  # Performance Tab
+    st.subheader("### Performance Metrics")
+    # Add performance summary or charts here
 
-            st.subheader("📉 Cumulative PnL Over Time")
-            trades_df['cumulative_pnl'] = trades_df['pnl'].cumsum()
-            st.line_chart(trades_df.set_index('exit_time')['cumulative_pnl'])
+with tabs[3]:  # Optimization Tab
+    st.subheader("### Optimization Results")
+    # Add optimization results here
 
-    with tabs[3]:
-        st.subheader("### Optimization Results")
-        threshold_filter = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.5)
-        filtered_results = optimization_results[optimization_results['ml_threshold'] >= threshold_filter]
-        st.write(filtered_results)
-
-        st.subheader("📊 Win Rate vs Total PnL")
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.scatter(optimization_results['win_rate'], optimization_results['total_pnl'], color='blue')
-        ax.set_title("Win Rate vs Total PnL")
-        ax.set_xlabel("Win Rate (%)")
-        ax.set_ylabel("Total PnL")
-        ax.grid(True)
-        st.pyplot(fig)
-
-    with tabs[4]:
-        st.subheader("📊 Trade Duration Histogram")
-        if not trades_df.empty:
-            fig2, ax2 = plt.subplots(figsize=(10, 6))
-            ax2.hist(trades_df['duration_min'], bins=30, color='skyblue', edgecolor='black')
-            ax2.set_title("Trade Duration (Minutes)")
-            ax2.set_xlabel("Duration (minutes)")
-            ax2.set_ylabel("Frequency")
-            st.pyplot(fig2)
-
-else:
-    st.warning("Please upload the necessary CSV files to proceed with the backtest.")
+with tabs[4]:  # Duration Histogram Tab
+    st.subheader("### Trade Duration Histogram")
+    # Add trade duration histogram here
