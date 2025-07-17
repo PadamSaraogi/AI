@@ -36,9 +36,13 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
         trade_time = df.index[i].time()  # Get the time part of the timestamp
         trade_date = df.index[i].date()
 
+        # Debugging: Print signal data and time
+        print(f"Signal: {sig}, Trade Date: {trade_date}, Trade Time: {trade_time}")
+
         # If there is an open trade from the previous day, re-enter at the start of the next day
         if last_trade_exit and trade_time >= REENTER_TIME and trade_date > last_trade_exit.date():
             # Re-enter the trade at 9:00 AM with the previous trade parameters
+            print(f"Re-entering trade on {trade_date} at {trade_time}")
             entry_price = price
             entry_sig = sig
             stop_price = entry_price - STOP_MULT * atr * entry_sig  # Stop loss
@@ -57,6 +61,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
             trail_price = entry_price  # Initial trailing stop
             in_trade = True
             entry_idx = i  # Store the entry index
+            print(f"Entering trade on {trade_date} at {trade_time}, Entry Price: {entry_price}")
             continue
 
         # If already in trade, manage the trade
@@ -83,6 +88,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
             # Force exit at 3:25 PM (Exit Time)
             if trade_time >= EXIT_TIME:
                 hit_exit = True  # Exit the trade at 3:25 PM
+                print(f"Exit at 3:25 PM, Exit Price: {price_now}")
 
             # If exit condition is met, close the trade
             if hit_exit:
