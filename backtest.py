@@ -115,7 +115,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                     'duration_min': duration  # Add duration in minutes (intraday)
                 })
 
-                # Reset trade variables for next trade
+                # Reset trade variables for the next trade, but don't block multiple trades
                 in_trade = False
                 cooldown = COOLDOWN_BARS  # Set cooldown period
                 last_trade_exit = df.index[i]  # Record the exit time of the current trade
