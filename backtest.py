@@ -61,6 +61,11 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
 
                 total_pnl = pnl_full  # Since we're not tracking half-exit, total PnL is just full exit
 
+                # Calculate fees (this can be customized, depending on your fee model)
+                fees = 0  # For simplicity, set fees to 0 here or add logic to compute fees
+
+                net_pnl = total_pnl - fees  # Calculate net profit/loss after fees
+
                 # Store trade data
                 trades.append({
                     'entry_time': df.index[entry_idx],
@@ -68,6 +73,8 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                     'entry_price': entry_price,
                     'final_exit_price': final_exit_price,
                     'pnl_final': pnl_full,
+                    'fees': fees,
+                    'net_pnl': net_pnl,  # Add net PnL
                     'pnl': total_pnl,
                     'trade_type': 'Buy' if entry_sig == 1 else 'Short Sell',
                     'duration_min': duration  # Add the duration in minutes
