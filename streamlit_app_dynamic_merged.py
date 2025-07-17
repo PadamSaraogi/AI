@@ -37,11 +37,14 @@ if csv_file and optimization_file:
     tabs = st.tabs(["Signals", "Backtest", "Performance", "Optimization", "Duration Histogram"])
 
     with tabs[0]:
-        st.subheader("Enhanced Signals Data")
+        st.subheader("### Enhanced Signals Data")
+
+    # Ensure the 'datetime' column is in datetime format
+    df_signals['datetime'] = pd.to_datetime(df_signals['datetime'])
 
     # Filter Data for Time Range Selection (Optional)
-    min_date = df_signals.index.min()
-    max_date = df_signals.index.max()
+    min_date = df_signals['datetime'].min().date()  # Convert to date
+    max_date = df_signals['datetime'].max().date()  # Convert to date
     selected_date_range = st.slider(
         "Select Date Range",
         min_value=min_date,
@@ -51,8 +54,8 @@ if csv_file and optimization_file:
     )
 
     # Filter the dataframe based on the selected date range
-    df_filtered = df_signals[(df_signals.index >= pd.to_datetime(selected_date_range[0])) &
-                             (df_signals.index <= pd.to_datetime(selected_date_range[1]))]
+    df_filtered = df_signals[(df_signals['datetime'].dt.date >= selected_date_range[0]) &
+                             (df_signals['datetime'].dt.date <= selected_date_range[1])]
 
     # Display Signal Data Table with Filtering and Sorting
     st.dataframe(df_filtered[['predicted_label', 'confidence', 'signal', 'position']])
