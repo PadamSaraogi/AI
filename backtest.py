@@ -8,7 +8,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
     COOLDOWN_BARS = 2  # Number of bars to wait before entering a new trade
     STOP_MULT = 1.0  # Stop loss multiplier based on ATR (Average True Range)
 
-    # We will track the current date to ensure the trade closes within the same day
+    # We will track the current date to ensure the trade closes at 3:20 PM
     current_date = None
 
     # Iterate through the signal dataframe
@@ -24,6 +24,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
         atr = df['ATR'].iat[i]
         adx = df['ADX14'].iat[i]
         trade_date = df.index[i].date()
+        trade_time = df.index[i].time()
 
         # If not already in trade and there's a signal (Buy or Sell)
         if not in_trade and sig != 0:
@@ -62,9 +63,9 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                 duration >= time_limit  # Limit to intraday (same day)
             )
 
-            # Force exit at the end of the day (i.e., market close)
-            if trade_date != current_date:
-                hit_exit = True  # Exit the trade if the date has changed (next day)
+            # Force exit at 3:20 PM (market close)
+            if trade_time >= pd.to_datetime("15:20:00").time():
+                hit_exit = True  # Exit the trade if the time is 3:20 PM or later
 
             # If exit condition is met, close the trade
             if hit_exit:
