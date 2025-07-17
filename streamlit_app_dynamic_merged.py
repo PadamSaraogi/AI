@@ -91,8 +91,48 @@ with tabs[0]:  # Signals Tab
 
 # Remaining tabs (Backtest, Performance, Optimization, Duration Histogram)
 with tabs[1]:  # Backtest Tab
-    st.subheader("Backtest Results")
-    # Add your backtest code here
+    st.subheader("### Backtest Results")
+
+    # Check if the data and backtest function are available
+    if csv_file is not None:
+        try:
+            # Assuming you have a backtest function that returns trade data
+            trades = run_backtest_simulation(df_signals)
+            trades_df = pd.DataFrame(trades)
+            
+            if not trades_df.empty:
+                # === Display Key Backtest Metrics ===
+                total_trades = len(trades_df)
+                profitable_trades = (trades_df['pnl'] > 0).sum()
+                win_rate = (profitable_trades / total_trades) * 100 if total_trades > 0 else 0
+                avg_pnl = trades_df['pnl'].mean() if total_trades > 0 else 0
+                total_fees = trades_df['fees'].sum() if 'fees' in trades_df.columns else 0
+                net_pnl = trades_df['net_pnl'].sum() if 'net_pnl' in trades_df.columns else 0
+
+                st.write(f"**Total Trades**: {total_trades}")
+                st.write(f"**Win Rate**: {win_rate:.2f}%")
+                st.write(f"**Average PnL**: {avg_pnl:.2f}")
+                st.write(f"**Total Fees**: {total_fees:.2f}")
+                st.write(f"**Net PnL**: {net_pnl:.2f}")
+
+                # === Cumulative PnL Over Time Visualization ===
+                st.subheader("### Cumulative PnL Over Time")
+                trades_df['cumulative_pnl'] = trades_df['pnl'].cumsum()
+                fig_cumulative_pnl = px.line(trades_df, x='exit_time', y='cumulative_pnl', title="Cumulative PnL")
+                st.plotly_chart(fig_cumulative_pnl)
+
+                # === Display Trade-by-Trade Details ===
+                st.subheader("### Trade-by-Trade Details")
+                st.write(trades_df[['entry_time', 'exit_time', 'entry_price', 'final_exit_price', 'pnl', 'fees', 'net_pnl']])
+
+            else:
+                st.warning("No trades were executed during the backtest.")
+                
+        except Exception as e:
+            st.error(f"An error occurred while running the backtest: {str(e)}")
+    else:
+        st.warning("Please upload a CSV file to proceed with the backtest.")
+
 
 with tabs[2]:  # Performance Tab
     st.subheader("Performance Metrics")
