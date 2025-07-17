@@ -5,7 +5,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
     trades = []  # Store trade information
     in_trade = False  # Flag to check if we are in a trade
     cooldown = 0  # Cooldown period after each trade
-    COOLDOWN_BARS = 2  # Number of bars to wait before entering a new trade
+    COOLDOWN_BARS = 0  # Set cooldown to 0 for testing to allow immediate re-entry
     STOP_MULT = 1.0  # Stop loss multiplier based on ATR (Average True Range)
 
     # Set the exit time (3:25 PM) and re-entry time (9:00 AM)
@@ -21,13 +21,11 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
     trail_price = None
     entry_idx = None
 
+    # Debugging: Check how many signals are non-zero
+    print(f"Total Valid Signals: {len(df[df['signal'] != 0])}")  # Check the number of non-zero signals
+
     # Iterate through the signal dataframe
     for i in range(1, len(df)):
-        # Skip if we're in cooldown
-        if cooldown > 0:
-            cooldown -= 1
-            continue
-
         # Extract relevant data from the current row (index i)
         sig = df['signal'].iat[i]
         price = df['close'].iat[i]
@@ -41,8 +39,8 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
 
         # If there is an open trade from the previous day, re-enter at the start of the next day
         if last_trade_exit and trade_time >= REENTER_TIME and trade_date > last_trade_exit.date():
-            # Re-enter the trade at 9:00 AM with the previous trade parameters
-            print(f"Re-entering trade on {trade_date} at {trade_time}")
+            # Debugging: Check re-entry condition
+            print(f"Re-entering trade on {trade_date} at {trade_time}, Last Exit: {last_trade_exit}")
             entry_price = price
             entry_sig = sig
             stop_price = entry_price - STOP_MULT * atr * entry_sig  # Stop loss
