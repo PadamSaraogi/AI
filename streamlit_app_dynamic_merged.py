@@ -22,6 +22,10 @@ if csv_file and optimization_file:
     # Load the Optimization Results Data
     optimization_results = pd.read_csv(optimization_file)
 
+    # === Check the column names of the optimization file to prevent KeyError ===
+    st.write("### Optimization Results Columns:")
+    st.write(optimization_results.columns)  # Display the column names
+
     # === Backtest Simulation ===
     trades = run_backtest_simulation(df_signals)
     trades_df = pd.DataFrame(trades)
