@@ -37,8 +37,51 @@ if csv_file and optimization_file:
     tabs = st.tabs(["Signals", "Backtest", "Performance", "Optimization", "Duration Histogram"])
 
     with tabs[0]:
-        st.subheader("### Enhanced Signals Data")
-        st.write(df_signals[['predicted_label', 'confidence', 'signal', 'position']].head())
+    st.subheader("Enhanced Signals Data")
+
+    # Filter Data for Time Range Selection (Optional)
+    min_date = df_signals.index.min()
+    max_date = df_signals.index.max()
+    selected_date_range = st.slider(
+        "Select Date Range",
+        min_value=min_date,
+        max_value=max_date,
+        value=(min_date, max_date),
+        format="YYYY-MM-DD"
+    )
+
+    # Filter the dataframe based on the selected date range
+    df_filtered = df_signals[(df_signals.index >= pd.to_datetime(selected_date_range[0])) &
+                             (df_signals.index <= pd.to_datetime(selected_date_range[1]))]
+
+    # Display Signal Data Table with Filtering and Sorting
+    st.dataframe(df_filtered[['predicted_label', 'confidence', 'signal', 'position']])
+
+    # === Signal Heatmap Visualization ===
+    st.subheader("### Signal Confidence Heatmap")
+    signal_matrix = df_filtered[['predicted_label', 'confidence', 'signal']].pivot_table(
+        values='confidence', index='predicted_label', columns='signal', aggfunc='mean'
+    )
+    fig_heatmap = px.imshow(signal_matrix, text_auto=True, color_continuous_scale='Blues', 
+                            title="Signal Confidence Heatmap")
+    st.plotly_chart(fig_heatmap)
+
+    # === Signal Distribution Visualization ===
+    st.subheader("### Signal Distribution")
+    fig_signal_dist = px.histogram(df_filtered, x="signal", color="signal",
+                                   title="Signal Distribution (Buy, Sell, Hold)")
+    st.plotly_chart(fig_signal_dist)
+
+    # === Signal Count and Summary ===
+    total_signals = len(df_filtered)
+    buy_signals = df_filtered[df_filtered['signal'] == 1].shape[0]
+    sell_signals = df_filtered[df_filtered['signal'] == -1].shape[0]
+    hold_signals = df_filtered[df_filtered['signal'] == 0].shape[0]
+
+    st.write(f"Total Signals: {total_signals}")
+    st.write(f"Buy Signals: {buy_signals} ({(buy_signals / total_signals) * 100:.2f}%)")
+    st.write(f"Sell Signals: {sell_signals} ({(sell_signals / total_signals) * 100:.2f}%)")
+    st.write(f"Hold Signals: {hold_signals} ({(hold_signals / total_signals) * 100:.2f}%)")
 
     with tabs[1]:
         if not trades_df.empty:
