@@ -194,7 +194,7 @@ if csv_file and optimization_file:
             csv_download = trades_df.to_csv(index=False).encode('utf-8')
             st.download_button("Download Trades as CSV", csv_download, file_name="backtest_trades.csv", mime='text/csv')
 
-             st.markdown("#### 🥧 Win vs Loss Breakdown")
+            st.markdown("#### 🥧 Win vs Loss Breakdown")
             
             # Count wins and losses
             win_loss_counts = trades_df['net_pnl'].apply(lambda x: 'Win' if x > 0 else 'Loss').value_counts()
