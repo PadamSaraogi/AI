@@ -261,7 +261,7 @@ if csv_file and optimization_file:
                     ax2.set_title("Parameter Grid Search")
                     st.pyplot(fig2)
         
-            else:
+                else:
                  st.warning("No optimization results found. Please upload data.")
 
     with tabs[4]:
