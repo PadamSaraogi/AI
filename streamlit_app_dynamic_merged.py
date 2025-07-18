@@ -382,10 +382,10 @@ if csv_file and optimization_file:
                     st.pyplot(fig)
 
 
-            except pd.errors.EmptyDataError:
-                st.error("The uploaded optimization file is empty.")
-            except Exception as e:
-                st.error(f"An error occurred while reading the file: {e}")
+        except pd.errors.EmptyDataError:
+            st.error("The uploaded optimization file is empty.")
+        except Exception as e:
+            st.error(f"An error occurred while reading the file: {e}")
 
 else:
     st.warning("Please upload the necessary CSV files to proceed with the backtest.")
