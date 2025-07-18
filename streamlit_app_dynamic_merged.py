@@ -119,7 +119,10 @@ if csv_file and optimization_file:
 
 
     with tabs[2]:
+        st.subheader("📈 Strategy Performance Summary")
+    
         if not trades_df.empty:
+            # === KPIs ===
             col1, col2, col3, col4, col5, col6 = st.columns(6)
             col1.metric("Total Trades", total_trades)
             col2.metric("Win Rate", f"{win_rate:.2f}%")
@@ -127,10 +130,46 @@ if csv_file and optimization_file:
             col4.metric("Gross PnL", f"{trades_df['pnl'].sum():.2f}")
             col5.metric("Net PnL", f"{trades_df['net_pnl'].sum():.2f}")
             col6.metric("Total Fees", f"{total_fees:.2f}")
+    
+            # === Cumulative PnL ===
+            st.markdown("#### 📊 Cumulative Net PnL Over Time")
+            trades_df = trades_df.sort_values('exit_time')
+            trades_df['cumulative_net_pnl'] = trades_df['net_pnl'].cumsum()
+            st.line_chart(trades_df.set_index('exit_time')['cumulative_net_pnl'])
+    
+            # === Best & Worst Trades ===
+            st.markdown("#### 🏆 Best and Worst Trades")
+            colA, colB = st.columns(2)
+            best_trade = trades_df.loc[trades_df['net_pnl'].idxmax()]
+            worst_trade = trades_df.loc[trades_df['net_pnl'].idxmin()]
+            colA.success("**Best Trade**")
+            colA.json(best_trade.to_dict())
+            colB.error("**Worst Trade**")
+            colB.json(worst_trade.to_dict())
+    
+            # === PnL Waterfall Chart ===
+            st.markdown("#### 🚰 Trade PnL Waterfall Chart")
+            fig, ax = plt.subplots(figsize=(12, 5))
+            cumulative = 0
+            bottoms = []
+            for pnl in trades_df['net_pnl']:
+                bottoms.append(cumulative)
+                cumulative += pnl
+            ax.bar(range(len(trades_df)), trades_df['net_pnl'], bottom=bottoms,
+                   color=['green' if x >= 0 else 'red' for x in trades_df['net_pnl']])
+            ax.set_title("Trade-by-Trade PnL Contribution")
+            ax.set_xlabel("Trade Index")
+            ax.set_ylabel("Net PnL")
+            st.pyplot(fig)
+    
+            # === Download Button ===
+            st.markdown("#### 💾 Download Trade Data")
+            csv_download = trades_df.to_csv(index=False).encode('utf-8')
+            st.download_button("Download Trades as CSV", csv_download, file_name="backtest_trades.csv", mime='text/csv')
+    
+        else:
+            st.warning("No trades to display. Upload data to begin.")
 
-            st.subheader("📉 Cumulative PnL Over Time")
-            trades_df['cumulative_pnl'] = trades_df['pnl'].cumsum()
-            st.line_chart(trades_df.set_index('exit_time')['cumulative_pnl'])
 
     with tabs[3]:
         st.subheader("### Optimization Results")
