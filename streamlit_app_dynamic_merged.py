@@ -194,6 +194,8 @@ if csv_file and optimization_file:
             csv_download = trades_df.to_csv(index=False).encode('utf-8')
             st.download_button("Download Trades as CSV", csv_download, file_name="backtest_trades.csv", mime='text/csv')
 
+            import plotly.graph_objects as go
+
             st.markdown("#### 🥧 Win vs Loss Breakdown")
             
             # Count wins and losses
@@ -201,27 +203,26 @@ if csv_file and optimization_file:
             labels = win_loss_counts.index.tolist()
             sizes = win_loss_counts.values
             colors = ['#4CAF50', '#F44336']  # Green for wins, red for losses
-            explode = [0.05 if label == 'Win' else 0 for label in labels]
             
-            # Custom label formatting
-            def autopct_format(pct, all_vals):
-                count = int(round(pct/100. * sum(all_vals)))
-                return f"{pct:.1f}%\n({count})"
-            
-            fig, ax = plt.subplots()
-            wedges, texts, autotexts = ax.pie(
-                sizes,
+            # Create Pie Chart with Plotly
+            fig = go.Figure(data=[go.Pie(
                 labels=labels,
-                autopct=lambda pct: autopct_format(pct, sizes),
-                colors=colors,
-                explode=explode,
-                startangle=90,
-                textprops=dict(color="black", fontsize=12)
+                values=sizes,
+                textinfo='label+percent+value',  # Show label, percentage, and value on slices
+                marker=dict(colors=colors),  # Custom colors
+                hoverinfo='label+percent+value',  # Hover shows all info
+                hole=0.3,  # Make it a donut chart (optional)
+                pull=[0.1 if label == 'Win' else 0 for label in labels],  # Explode the 'Win' slice slightly
+            )])
+            
+            fig.update_layout(
+                title="Trade Outcome Distribution",
+                title_x=0.5,
+                template="plotly_dark",  # Optional: change chart theme
+                showlegend=False
             )
             
-            ax.set_title("Trade Outcome Distribution", fontsize=14)
-            ax.axis('equal')  # Equal aspect ratio ensures circle
-            st.pyplot(fig)
+            st.plotly_chart(fig)
 
     
         else:
