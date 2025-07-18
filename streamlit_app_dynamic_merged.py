@@ -58,7 +58,7 @@ if csv_file and optimization_file:
         st.write(signal_counts.rename({-1: "Sell (-1)", 0: "Neutral (0)", 1: "Buy (1)"}))
 
         if not trades_df.empty:
-            st.subheader("### Backtest Results")
+            st.subheader("Backtest Results")
             st.write(f"Total Trades: {total_trades}")
             st.dataframe(trades_df)
                     
