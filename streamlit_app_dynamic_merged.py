@@ -228,41 +228,58 @@ if csv_file and optimization_file:
         else:
             st.warning("No trades to display. Upload data to begin.")
 
-
     with tabs[3]:
-        st.subheader("Optimization Results")
-        if not optimization_results.empty:
-                # === Confidence Threshold Filter ===
-                threshold_filter = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.5)
-                filtered_results = optimization_results[optimization_results['ml_threshold'] >= threshold_filter]
-        
-                # === Scatter Plot: Win Rate vs Total PnL ===
-                st.markdown("#### 📉 Win Rate vs Total PnL")
-                fig, ax = plt.subplots(figsize=(10, 6))
-                ax.scatter(filtered_results['win_rate'], filtered_results['total_pnl'], color='blue', alpha=0.5)
-                ax.set_xlabel("Win Rate (%)")
-                ax.set_ylabel("Total PnL")
-                ax.set_title("Win Rate vs Total PnL")
-                ax.grid(True)
-                st.pyplot(fig)
-        
-                # === Parameter Combination Grid (Optional Visualization) ===
-                if 'param1' in filtered_results.columns and 'param2' in filtered_results.columns:
-                    st.markdown("#### 📊 Parameter Combination Grid")
-                    param1_values = filtered_results['param1'].unique()
-                    param2_values = filtered_results['param2'].unique()
-        
-                    fig2, ax2 = plt.subplots(figsize=(10, 6))
-                    # Create a heatmap of win_rate against param1 and param2
-                    c = ax2.pcolormesh(param1_values, param2_values, filtered_results.pivot('param2', 'param1', 'win_rate'), cmap='Blues')
-                    fig2.colorbar(c, ax=ax2)
-                    ax2.set_xlabel("Parameter 1")
-                    ax2.set_ylabel("Parameter 2")
-                    ax2.set_title("Parameter Grid Search")
-                    st.pyplot(fig2)
-        
-                else:
-                 st.warning("No optimization results found. Please upload data.")
+    st.subheader("📊 Optimization Results")
+
+    # File Upload Section (for optimization results)
+    optimization_file = st.sidebar.file_uploader("📂 Upload `grid_search_results_BEL.csv`", type="csv")
+
+    if optimization_file:
+        # Load the optimization results CSV
+        optimization_results = pd.read_csv(optimization_file)
+        st.write("Optimization results loaded successfully!")
+        st.write(optimization_results.head())  # Display the first few rows to check the content
+
+        # Check the columns of the uploaded file
+        st.write("Columns in the uploaded file:", optimization_results.columns)
+
+        # Filter based on the confidence threshold slider
+        threshold_filter = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.5)
+        filtered_results = optimization_results[optimization_results['ml_threshold'] >= threshold_filter]
+
+        # Show filtered results or warn if no results match the threshold
+        if filtered_results.empty:
+            st.warning(f"No results found above the selected threshold {threshold_filter:.2f}")
+        else:
+            st.write(filtered_results)
+
+            # === Scatter Plot: Win Rate vs Total PnL ===
+            st.markdown("#### 📉 Win Rate vs Total PnL")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.scatter(filtered_results['win_rate'], filtered_results['total_pnl'], color='blue', alpha=0.5)
+            ax.set_xlabel("Win Rate (%)")
+            ax.set_ylabel("Total PnL")
+            ax.set_title("Win Rate vs Total PnL")
+            ax.grid(True)
+            st.pyplot(fig)
+
+            # === Parameter Combination Grid Visualization (if applicable) ===
+            if 'param1' in filtered_results.columns and 'param2' in filtered_results.columns:
+                st.markdown("#### 📊 Parameter Combination Grid")
+                param1_values = filtered_results['param1'].unique()
+                param2_values = filtered_results['param2'].unique()
+
+                fig2, ax2 = plt.subplots(figsize=(10, 6))
+                c = ax2.pcolormesh(param1_values, param2_values, filtered_results.pivot('param2', 'param1', 'win_rate'), cmap='Blues')
+                fig2.colorbar(c, ax=ax2)
+                ax2.set_xlabel("Parameter 1")
+                ax2.set_ylabel("Parameter 2")
+                ax2.set_title("Parameter Grid Search")
+                st.pyplot(fig2)
+
+    else:
+        optimization_results = pd.DataFrame()  # If no file is uploaded
+        st.warning("No optimization results found. Please upload a valid CSV file.")
 
     with tabs[4]:
         st.subheader("📊 Trade Duration Histogram")
