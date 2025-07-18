@@ -66,10 +66,57 @@ if csv_file and optimization_file:
         st.dataframe(df_signals[['predicted_label', 'confidence', 'signal', 'position']].head(100))
 
     with tabs[1]:
+        st.subheader("📊 Backtest Trade Explorer")
+
         if not trades_df.empty:
-            st.subheader("Backtest Results")
-            st.write(f"Total Trades: {total_trades}")
-            st.dataframe(trades_df)
+            # === Filters ===
+            st.markdown("#### 🔍 Filter Trades")
+            trade_type = st.selectbox("Trade Type", options=["All", "Buy", "Short Sell"])
+            min_dur, max_dur = int(trades_df['duration_min'].min()), int(trades_df['duration_min'].max())
+            dur_range = st.slider("Trade Duration (minutes)", min_dur, max_dur, (min_dur, max_dur))
+    
+            filtered_trades = trades_df.copy()
+            if trade_type != "All":
+                filtered_trades = filtered_trades[filtered_trades['trade_type'] == trade_type]
+            filtered_trades = filtered_trades[
+                (filtered_trades['duration_min'] >= dur_range[0]) &
+                (filtered_trades['duration_min'] <= dur_range[1])
+            ]
+    
+            st.write(f"📦 Showing {len(filtered_trades)} trades")
+    
+            # === Trade Table ===
+            st.markdown("#### 📄 Filtered Trade Log")
+            st.dataframe(filtered_trades.sort_values(by='exit_time', ascending=False).reset_index(drop=True))
+    
+            # === Trade Timeline Plot ===
+            st.markdown("#### 🕒 Trade Duration Timeline")
+            fig, ax = plt.subplots(figsize=(12, 4))
+            for idx, row in filtered_trades.iterrows():
+                ax.plot([row['entry_time'], row['exit_time']], [idx, idx],
+                        color='green' if row['net_pnl'] >= 0 else 'red',
+                        linewidth=2, alpha=0.7)
+            ax.set_xlabel("Time")
+            ax.set_title("Entry to Exit Duration of Each Trade")
+            ax.grid(True)
+            st.pyplot(fig)
+    
+            # === Trade Column Definitions (Helpful Tooltip) ===
+            with st.expander("ℹ️ What does each column mean?"):
+                st.markdown("""
+                - `entry_time`: Trade start time  
+                - `exit_time`: Trade end time  
+                - `entry_price`: Entry price  
+                - `final_exit_price`: Exit price  
+                - `pnl_final`: Gross profit/loss  
+                - `net_pnl`: Profit after fees  
+                - `trade_type`: Buy or Short  
+                - `duration_min`: Trade length (in minutes)  
+                """)
+    
+        else:
+            st.info("No trades found in the uploaded file.")
+
 
     with tabs[2]:
         if not trades_df.empty:
