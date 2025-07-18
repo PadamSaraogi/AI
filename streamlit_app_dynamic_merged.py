@@ -1,20 +1,3 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from backtest import run_backtest_simulation  # Assuming backtest.py is in the same directory
-import plotly.graph_objects as go
-
-# === Streamlit Configuration ===
-st.set_page_config(layout="wide")
-st.title("📈 Trading Signal Dashboard")
-
-# === File Upload Section ===
-st.sidebar.header("Upload Files")
-csv_file = st.sidebar.file_uploader("📂 Upload `5m_signals_enhanced_<STOCK>.csv`", type="csv")
-optimization_file = st.sidebar.file_uploader("📂 Upload `grid_search_results_BEL.csv`", type="csv")
-
-# === File Handling and Backtest ===
 if csv_file and optimization_file:
     # Check if the optimization file is empty
     file_size = optimization_file.size
@@ -28,8 +11,10 @@ if csv_file and optimization_file:
 
             # Load the Optimization Results Data
             optimization_results = pd.read_csv(optimization_file)
+
+            # Check if the optimization results file is empty
             if optimization_results.empty:
-                st.error("The uploaded optimization file is empty. Please upload a valid file.")
+                st.warning("The uploaded optimization file is empty. Please upload a valid CSV file.")
             else:
                 st.write("Optimization results loaded successfully!")
                 st.write(optimization_results.head())  # Display the first few rows to check the content
