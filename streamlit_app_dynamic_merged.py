@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from backtest import run_backtest_simulation  # Assuming backtest.py is in the same directory
+import plotly.graph_objects as go
 
 # === Streamlit Configuration ===
 st.set_page_config(layout="wide")
@@ -34,7 +35,7 @@ if csv_file and optimization_file:
     total_fees = trades_df['fees'].sum() if 'fees' in trades_df.columns else 0
 
     # === Tabs Layout using `st.tabs()` ===
-    tabs = st.tabs(["Signals", "backtest", "Performance", "Optimization", "Insights"])
+    tabs = st.tabs(["Signals", "Backtest", "Performance", "Optimization", "Insights"])
 
     with tabs[0]:
         st.subheader("🔍 Enhanced Signals Data Exploration")
@@ -194,34 +195,30 @@ if csv_file and optimization_file:
             csv_download = trades_df.to_csv(index=False).encode('utf-8')
             st.download_button("Download Trades as CSV", csv_download, file_name="backtest_trades.csv", mime='text/csv')
 
-            import plotly.graph_objects as go
-
+            # === Win vs Loss Breakdown (Plotly) ===
             st.markdown("#### 🥧 Win vs Loss Breakdown")
-            
-            # Count wins and losses
             win_loss_counts = trades_df['net_pnl'].apply(lambda x: 'Win' if x > 0 else 'Loss').value_counts()
             labels = win_loss_counts.index.tolist()
             sizes = win_loss_counts.values
-            colors = ['#4CAF50', '#F44336']  # Green for wins, red for losses
-            
-            # Create Pie Chart with Plotly
+            colors = ['#4CAF50', '#F44336']
+
             fig = go.Figure(data=[go.Pie(
                 labels=labels,
                 values=sizes,
-                textinfo='label+percent+value',  # Show label, percentage, and value on slices
-                marker=dict(colors=colors),  # Custom colors
-                hoverinfo='label+percent+value',  # Hover shows all info
-                hole=0.3,  # Make it a donut chart (optional)
-                pull=[0.1 if label == 'Win' else 0 for label in labels],  # Explode the 'Win' slice slightly
+                textinfo='label+percent+value',
+                marker=dict(colors=colors),
+                hoverinfo='label+percent+value',
+                hole=0.3,
+                pull=[0.1 if label == 'Win' else 0 for label in labels],
             )])
-            
+
             fig.update_layout(
                 title="Trade Outcome Distribution",
                 title_x=0.5,
-                template="plotly_dark",  # Optional: change chart theme
+                template="plotly_dark",
                 showlegend=False
             )
-            
+
             st.plotly_chart(fig)
 
     
