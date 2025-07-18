@@ -124,7 +124,7 @@ if csv_file and optimization_file:
                                 """)
                     
                             else:
-                                st.info("No trades found in the uploaded file.")
+                            st.info("No trades found in the uploaded file.")
 
 
             with tabs[2]:
