@@ -34,7 +34,7 @@ if csv_file and optimization_file:
     total_fees = trades_df['fees'].sum() if 'fees' in trades_df.columns else 0
 
     # === Tabs Layout using `st.tabs()` ===
-    tabs = st.tabs(["Signals", "backtest", "Performance", "Optimization", "Duration Histogram"])
+    tabs = st.tabs(["Signals", "backtest", "Performance", "Optimization", "Insights"])
 
     with tabs[0]:
         st.subheader("🔍 Enhanced Signals Data Exploration")
