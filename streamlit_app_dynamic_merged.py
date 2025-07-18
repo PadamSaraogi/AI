@@ -13,12 +13,6 @@ st.sidebar.header("Upload Files")
 csv_file = st.sidebar.file_uploader("📂 Upload `5m_signals_enhanced_<STOCK>.csv`", type="csv")
 optimization_file = st.sidebar.file_uploader("📂 Upload `grid_search_results_BEL.csv`", type="csv")
 
-if optimization_file:
-    optimization_results = pd.read_csv(optimization_file)
-    st.write("Optimization results loaded successfully.")
-else:
-    optimization_results = pd.DataFrame()
-
 # === File Handling and Backtest ===
 if csv_file and optimization_file:
     # Load the Enhanced Signal Data
