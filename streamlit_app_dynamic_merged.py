@@ -282,6 +282,106 @@ if csv_file and optimization_file:
                 else:
                     st.warning("No optimization results found. Please upload a valid CSV file.")
 
+            with tabs[4]:
+                st.subheader("📊 Insights")
+            
+                # === Trade Duration Histogram ===
+                st.markdown("#### 📊 Trade Duration Histogram")
+                if not trades_df.empty:
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    ax.hist(trades_df['duration_min'], bins=30, color='skyblue', edgecolor='black')
+                    ax.set_title("Distribution of Trade Duration (Minutes)")
+                    ax.set_xlabel("Duration (minutes)")
+                    ax.set_ylabel("Frequency")
+                    st.pyplot(fig)
+                else:
+                    st.warning("No trades found to display. Please upload valid data.")
+            
+                # === Cumulative Net PnL Comparison: Strategy vs Buy & Hold ===
+                st.markdown("#### 📈 Strategy vs Buy & Hold Comparison")
+            
+                if not trades_df.empty:
+                    # Calculate cumulative strategy PnLs
+                    trades_df['cumulative_net'] = trades_df['net_pnl'].cumsum()
+            
+                    # Calculate Buy & Hold return series
+                    start_price = df_signals['close'].iloc[0]
+                    df_signals['buy_hold_return'] = df_signals['close'] - start_price
+            
+                    # Merge both strategy and buy & hold into one DataFrame for plotting
+                    aligned_df = pd.merge(
+                        trades_df[['exit_time', 'cumulative_net']],
+                        df_signals[['buy_hold_return']],
+                        left_on='exit_time',
+                        right_index=True,
+                        how='inner'
+                    )
+            
+                    # Plotting the cumulative strategy vs buy & hold
+                    fig, ax = plt.subplots(figsize=(12, 5))
+                    aligned_df.set_index('exit_time')['cumulative_net'].plot(ax=ax, label="Net Strategy PnL", color='blue')
+                    aligned_df.set_index('exit_time')['buy_hold_return'].plot(ax=ax, label="Buy & Hold", color='gray', linestyle='--')
+            
+                    ax.set_title("Cumulative Performance: Strategy vs Buy & Hold")
+                    ax.set_ylabel("₹ Value")
+                    ax.set_xlabel("Date")
+                    ax.legend()
+                    ax.grid(True)
+                    st.pyplot(fig)
+            
+                # === Win Rate Over Time (Optional) ===
+                st.markdown("#### 📈 Win Rate Over Time")
+                
+                if not trades_df.empty:
+                    trades_df['win_rate'] = (trades_df['pnl'] > 0).rolling(window=10).mean() * 100  # Rolling win rate
+            
+                    fig, ax = plt.subplots(figsize=(12, 5))
+                    trades_df.set_index('exit_time')['win_rate'].plot(ax=ax, color='green')
+                    ax.set_title("Win Rate Over Time (10-period Rolling)")
+                    ax.set_ylabel("Win Rate (%)")
+                    ax.set_xlabel("Date")
+                    ax.grid(True)
+                    st.pyplot(fig)
+                else:
+                    st.warning("No trades found to display win rate.")
+            
+                # === Risk-Adjusted Metrics ===
+                st.markdown("#### 📉 Risk-Adjusted Metrics")
+            
+                if not trades_df.empty:
+                    # Calculate daily returns (if you have minute-by-minute or hourly data, you can adjust accordingly)
+                    trades_df['daily_returns'] = trades_df['net_pnl'].pct_change()
+            
+                    # Sharpe Ratio
+                    sharpe_ratio = calculate_sharpe_ratio(trades_df['daily_returns'])
+                    st.write(f"**Sharpe Ratio**: {sharpe_ratio:.2f}")
+            
+                    # Sortino Ratio
+                    sortino_ratio = calculate_sortino_ratio(trades_df['daily_returns'])
+                    st.write(f"**Sortino Ratio**: {sortino_ratio:.2f}")
+            
+                    # Maximum Drawdown
+                    cumulative_returns = trades_df['cumulative_net'] / trades_df['cumulative_net'].iloc[0]  # Normalize cumulative PnL
+                    max_drawdown = calculate_max_drawdown(cumulative_returns)
+                    st.write(f"**Maximum Drawdown**: {max_drawdown:.2f}")
+            
+                    # Volatility (Standard Deviation of Returns)
+                    volatility = calculate_volatility(trades_df['daily_returns'])
+                    st.write(f"**Volatility**: {volatility:.2f}")
+            
+                # === Advanced Insights: Sharpe Ratio vs Total PnL ===
+                st.markdown("#### 📊 Sharpe Ratio vs Total PnL")
+            
+                if not trades_df.empty:
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    ax.scatter(sharpe_ratio, trades_df['total_pnl'], color='blue', alpha=0.5)
+                    ax.set_xlabel("Sharpe Ratio")
+                    ax.set_ylabel("Total PnL")
+                    ax.set_title("Sharpe Ratio vs Total PnL")
+                    ax.grid(True)
+                    st.pyplot(fig)
+
+
         except pd.errors.EmptyDataError:
             st.error("The uploaded optimization file is empty.")
         except Exception as e:
