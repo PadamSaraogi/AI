@@ -283,3 +283,7 @@ if csv_file and optimization_file:
                 
                     else:
                         st.warning("No optimization results found. Please upload a valid CSV file.")
+
+        except Exception as e:
+            st.error(f"An error occurred during file processing or backtesting: {e}")
+
