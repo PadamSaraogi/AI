@@ -131,31 +131,32 @@ if csv_file and optimization_file:
             col5.metric("Net PnL", f"{trades_df['net_pnl'].sum():.2f}")
             col6.metric("Total Fees", f"{total_fees:.2f}")
     
-            # === Cumulative Gross vs Net PnL vs Buy & Hold ===
             st.markdown("#### 📊 Cumulative Gross vs Net vs Buy & Hold")
-            
-            # Sort trades by exit time
+
+            # Calculate cumulative strategy PnLs
             trades_df = trades_df.sort_values('exit_time')
             trades_df['cumulative_gross'] = trades_df['pnl'].cumsum()
             trades_df['cumulative_net'] = trades_df['net_pnl'].cumsum()
             
-            # Buy & Hold Return
+            # Calculate Buy & Hold return series
             start_price = df_signals['close'].iloc[0]
             df_signals['buy_hold_return'] = df_signals['close'] - start_price
             
-            # Match Buy & Hold on same exit timestamps
-            buy_hold_curve = df_signals.loc[
-                df_signals.index.isin(trades_df['exit_time'])
-            ][['buy_hold_return']].copy()
-            buy_hold_curve = buy_hold_curve.copy()
-            buy_hold_curve['cumulative_net'] = trades_df['cumulative_net'].values
-            buy_hold_curve['cumulative_gross'] = trades_df['cumulative_gross'].values
+            # Merge all into one timeline based on exit_time
+            aligned_df = pd.merge(
+                trades_df[['exit_time', 'cumulative_gross', 'cumulative_net']],
+                df_signals[['buy_hold_return']],
+                left_on='exit_time',
+                right_index=True,
+                how='inner'
+            )
             
-            # Plot all three
+            # Plot the three curves
             fig, ax = plt.subplots(figsize=(12, 5))
-            buy_hold_curve['buy_hold_return'].plot(ax=ax, label="Buy & Hold", linestyle='--', color='gray')
-            buy_hold_curve['cumulative_gross'].plot(ax=ax, label="Gross Strategy PnL", color='orange')
-            buy_hold_curve['cumulative_net'].plot(ax=ax, label="Net Strategy PnL", color='blue')
+            aligned_df.set_index('exit_time')['buy_hold_return'].plot(ax=ax, label="Buy & Hold", linestyle='--', color='gray')
+            aligned_df.set_index('exit_time')['cumulative_gross'].plot(ax=ax, label="Gross Strategy PnL", color='orange')
+            aligned_df.set_index('exit_time')['cumulative_net'].plot(ax=ax, label="Net Strategy PnL", color='blue')
+            
             ax.set_title("Cumulative Returns: Strategy vs Buy & Hold")
             ax.set_ylabel("₹ Value")
             ax.set_xlabel("Date")
