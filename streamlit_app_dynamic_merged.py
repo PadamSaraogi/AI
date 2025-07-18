@@ -123,7 +123,7 @@ if csv_file and optimization_file:
                                 - `duration_min`: Trade length (in minutes)  
                                 """)
                     
-                            else:
+                        else:
                             st.info("No trades found in the uploaded file.")
 
 
