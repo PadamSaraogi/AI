@@ -56,7 +56,12 @@ if csv_file and optimization_file:
         st.markdown("📊 Signal Summary")
         signal_counts = df_signals['signal'].value_counts().sort_index()
         st.write(signal_counts.rename({-1: "Sell (-1)", 0: "Neutral (0)", 1: "Buy (1)"}))
-    
+
+        if not trades_df.empty:
+            st.subheader("### Backtest Results")
+            st.write(f"Total Trades: {total_trades}")
+            st.dataframe(trades_df)
+                    
         # --- Line Chart: Signal Over Time ---
         st.markdown("⏱️ Signal Timeline")
         st.line_chart(df_signals['signal'])
