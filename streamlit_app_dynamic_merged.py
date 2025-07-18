@@ -194,13 +194,35 @@ if csv_file and optimization_file:
             csv_download = trades_df.to_csv(index=False).encode('utf-8')
             st.download_button("Download Trades as CSV", csv_download, file_name="backtest_trades.csv", mime='text/csv')
 
-            # === Win vs Loss Pie Chart ===
-            st.markdown("#### 🥧 Win vs Loss Breakdown")
+             st.markdown("#### 🥧 Win vs Loss Breakdown")
+            
+            # Count wins and losses
             win_loss_counts = trades_df['net_pnl'].apply(lambda x: 'Win' if x > 0 else 'Loss').value_counts()
-            fig2, ax2 = plt.subplots()
-            ax2.pie(win_loss_counts, labels=win_loss_counts.index, autopct='%1.1f%%', colors=['green', 'red'])
-            ax2.set_title("Trade Outcome Distribution")
-            st.pyplot(fig2)
+            labels = win_loss_counts.index.tolist()
+            sizes = win_loss_counts.values
+            colors = ['#4CAF50', '#F44336']  # Green for wins, red for losses
+            explode = [0.05 if label == 'Win' else 0 for label in labels]
+            
+            # Custom label formatting
+            def autopct_format(pct, all_vals):
+                count = int(round(pct/100. * sum(all_vals)))
+                return f"{pct:.1f}%\n({count})"
+            
+            fig, ax = plt.subplots()
+            wedges, texts, autotexts = ax.pie(
+                sizes,
+                labels=labels,
+                autopct=lambda pct: autopct_format(pct, sizes),
+                colors=colors,
+                explode=explode,
+                startangle=90,
+                textprops=dict(color="black", fontsize=12)
+            )
+            
+            ax.set_title("Trade Outcome Distribution", fontsize=14)
+            ax.axis('equal')  # Equal aspect ratio ensures circle
+            st.pyplot(fig)
+
     
         else:
             st.warning("No trades to display. Upload data to begin.")
