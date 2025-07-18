@@ -231,7 +231,7 @@ if csv_file and optimization_file:
 
     with tabs[3]:
         st.subheader("Optimization Results")
-          if not optimization_results.empty:
+        if not optimization_results.empty:
                 # === Confidence Threshold Filter ===
                 threshold_filter = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.5)
                 filtered_results = optimization_results[optimization_results['ml_threshold'] >= threshold_filter]
