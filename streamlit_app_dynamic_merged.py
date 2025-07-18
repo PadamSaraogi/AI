@@ -229,7 +229,7 @@ if csv_file and optimization_file:
             st.warning("No trades to display. Upload data to begin.")
 
     with tabs[3]:
-    st.subheader("📊 Optimization Results")
+        st.subheader("📊 Optimization Results")
 
     # File Upload Section (for optimization results)
     optimization_file = st.sidebar.file_uploader("📂 Upload `grid_search_results_BEL.csv`", type="csv")
