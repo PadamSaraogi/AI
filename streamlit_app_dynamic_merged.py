@@ -34,7 +34,7 @@ if csv_file and optimization_file:
     total_fees = trades_df['fees'].sum() if 'fees' in trades_df.columns else 0
 
     # === Tabs Layout using `st.tabs()` ===
-    tabs = st.tabs(["Signals", "Backtest", "Performance", "Optimization", "Duration Histogram"])
+    tabs = st.tabs(["Signals", "Performance", "Optimization", "Duration Histogram"])
 
     with tabs[0]:
         st.subheader("🔍 Enhanced Signals Data Exploration")
@@ -72,12 +72,6 @@ if csv_file and optimization_file:
 
     with tabs[1]:
         if not trades_df.empty:
-            st.subheader("### Backtest Results")
-            st.write(f"Total Trades: {total_trades}")
-            st.dataframe(trades_df)
-
-    with tabs[2]:
-        if not trades_df.empty:
             col1, col2, col3, col4, col5, col6 = st.columns(6)
             col1.metric("Total Trades", total_trades)
             col2.metric("Win Rate", f"{win_rate:.2f}%")
@@ -90,7 +84,7 @@ if csv_file and optimization_file:
             trades_df['cumulative_pnl'] = trades_df['pnl'].cumsum()
             st.line_chart(trades_df.set_index('exit_time')['cumulative_pnl'])
 
-    with tabs[3]:
+    with tabs[2]:
         st.subheader("### Optimization Results")
         threshold_filter = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.5)
         filtered_results = optimization_results[optimization_results['ml_threshold'] >= threshold_filter]
@@ -105,7 +99,7 @@ if csv_file and optimization_file:
         ax.grid(True)
         st.pyplot(fig)
 
-    with tabs[4]:
+    with tabs[3]:
         st.subheader("📊 Trade Duration Histogram")
         if not trades_df.empty:
             fig2, ax2 = plt.subplots(figsize=(10, 6))
