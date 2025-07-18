@@ -131,11 +131,37 @@ if csv_file and optimization_file:
             col5.metric("Net PnL", f"{trades_df['net_pnl'].sum():.2f}")
             col6.metric("Total Fees", f"{total_fees:.2f}")
     
-            # === Cumulative PnL ===
-            st.markdown("#### 📊 Cumulative Net PnL Over Time")
+            # === Cumulative Gross vs Net PnL vs Buy & Hold ===
+            st.markdown("#### 📊 Cumulative Gross vs Net vs Buy & Hold")
+            
+            # Sort trades by exit time
             trades_df = trades_df.sort_values('exit_time')
-            trades_df['cumulative_net_pnl'] = trades_df['net_pnl'].cumsum()
-            st.line_chart(trades_df.set_index('exit_time')['cumulative_net_pnl'])
+            trades_df['cumulative_gross'] = trades_df['pnl'].cumsum()
+            trades_df['cumulative_net'] = trades_df['net_pnl'].cumsum()
+            
+            # Buy & Hold Return
+            start_price = df_signals['close'].iloc[0]
+            df_signals['buy_hold_return'] = df_signals['close'] - start_price
+            
+            # Match Buy & Hold on same exit timestamps
+            buy_hold_curve = df_signals.loc[
+                df_signals.index.isin(trades_df['exit_time'])
+            ][['buy_hold_return']].copy()
+            buy_hold_curve = buy_hold_curve.copy()
+            buy_hold_curve['cumulative_net'] = trades_df['cumulative_net'].values
+            buy_hold_curve['cumulative_gross'] = trades_df['cumulative_gross'].values
+            
+            # Plot all three
+            fig, ax = plt.subplots(figsize=(12, 5))
+            buy_hold_curve['buy_hold_return'].plot(ax=ax, label="Buy & Hold", linestyle='--', color='gray')
+            buy_hold_curve['cumulative_gross'].plot(ax=ax, label="Gross Strategy PnL", color='orange')
+            buy_hold_curve['cumulative_net'].plot(ax=ax, label="Net Strategy PnL", color='blue')
+            ax.set_title("Cumulative Returns: Strategy vs Buy & Hold")
+            ax.set_ylabel("₹ Value")
+            ax.set_xlabel("Date")
+            ax.legend()
+            ax.grid(True)
+            st.pyplot(fig)
     
             # === Best & Worst Trades ===
             st.markdown("#### 🏆 Best and Worst Trades")
