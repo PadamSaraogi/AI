@@ -77,7 +77,7 @@ if csv_file and optimization_file:
             with tabs[1]:
                 st.subheader("📊 Backtest Trade Explorer")
                 
-                        if not trades_df.empty:
+                if not trades_df.empty:
                             # === Filters ===
                             st.markdown("#### 🔍 Filter Trades")
                             trade_type = st.selectbox("Trade Type", options=["All", "Buy", "Short Sell"])
