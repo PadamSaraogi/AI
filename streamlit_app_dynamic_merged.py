@@ -37,8 +37,42 @@ if csv_file and optimization_file:
     tabs = st.tabs(["Signals", "Backtest", "Performance", "Optimization", "Duration Histogram"])
 
     with tabs[0]:
-        st.subheader("### Enhanced Signals Data")
-        st.write(df_signals[['predicted_label', 'confidence', 'signal', 'position']].head())
+        st.subheader("🔍 Enhanced Signals Data Exploration")
+
+    # --- Filter Controls ---
+    st.markdown("📅 Filter by Date Range")
+    min_date, max_date = df_signals.index.min(), df_signals.index.max()
+    date_range = st.date_input("Select range", [min_date, max_date])
+    if len(date_range) == 2:
+        df_signals = df_signals.loc[date_range[0]:date_range[1]]
+
+    st.markdown("🎯 Filter by Signal Type")
+    signal_option = st.selectbox("Show Signals", ["All", "Buy (1)", "Sell (-1)", "Neutral (0)"])
+    if signal_option != "All":
+        signal_map = {"Buy (1)": 1, "Sell (-1)": -1, "Neutral (0)": 0}
+        df_signals = df_signals[df_signals['signal'] == signal_map[signal_option]]
+
+    # --- Signal Summary ---
+    st.markdown("📊 Signal Summary")
+    signal_counts = df_signals['signal'].value_counts().sort_index()
+    st.write(signal_counts.rename({-1: "Sell (-1)", 0: "Neutral (0)", 1: "Buy (1)"}))
+
+    # --- Line Chart: Signal Over Time ---
+    st.markdown("⏱️ Signal Timeline")
+    st.line_chart(df_signals['signal'])
+
+    # --- Scatter Plot: Confidence vs Signal ---
+    st.markdown("🔬 Confidence vs Signal")
+    fig, ax = plt.subplots(figsize=(10, 5))
+    scatter = ax.scatter(df_signals['confidence'], df_signals['signal'], c=df_signals['signal'], cmap='bwr', alpha=0.5)
+    ax.set_xlabel("Confidence")
+    ax.set_ylabel("Signal")
+    ax.set_title("Confidence vs Signal Scatter Plot")
+    st.pyplot(fig)
+
+    # --- Data Preview ---
+    st.markdown("📄 Signal Table Preview")
+    st.dataframe(df_signals[['predicted_label', 'confidence', 'signal', 'position']].head(100))
 
     with tabs[1]:
         if not trades_df.empty:
