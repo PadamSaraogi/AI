@@ -34,7 +34,7 @@ if csv_file and optimization_file:
     total_fees = trades_df['fees'].sum() if 'fees' in trades_df.columns else 0
 
     # === Tabs Layout using `st.tabs()` ===
-    tabs = st.tabs(["Signals", "Performance", "Optimization", "Duration Histogram"])
+    tabs = st.tabs(["Signals", "backtest", "Performance", "Optimization", "Duration Histogram"])
 
     with tabs[0]:
         st.subheader("🔍 Enhanced Signals Data Exploration")
@@ -56,11 +56,6 @@ if csv_file and optimization_file:
         st.markdown("📊 Signal Summary")
         signal_counts = df_signals['signal'].value_counts().sort_index()
         st.write(signal_counts.rename({-1: "Sell (-1)", 0: "Neutral (0)", 1: "Buy (1)"}))
-
-        if not trades_df.empty:
-            st.subheader("Backtest Results")
-            st.write(f"Total Trades: {total_trades}")
-            st.dataframe(trades_df)
                     
         # --- Line Chart: Signal Over Time ---
         st.markdown("⏱️ Signal Timeline")
@@ -71,6 +66,12 @@ if csv_file and optimization_file:
         st.dataframe(df_signals[['predicted_label', 'confidence', 'signal', 'position']].head(100))
 
     with tabs[1]:
+        if not trades_df.empty:
+            st.subheader("Backtest Results")
+            st.write(f"Total Trades: {total_trades}")
+            st.dataframe(trades_df)
+
+    with tabs[2]:
         if not trades_df.empty:
             col1, col2, col3, col4, col5, col6 = st.columns(6)
             col1.metric("Total Trades", total_trades)
@@ -84,7 +85,7 @@ if csv_file and optimization_file:
             trades_df['cumulative_pnl'] = trades_df['pnl'].cumsum()
             st.line_chart(trades_df.set_index('exit_time')['cumulative_pnl'])
 
-    with tabs[2]:
+    with tabs[3]:
         st.subheader("### Optimization Results")
         threshold_filter = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.5)
         filtered_results = optimization_results[optimization_results['ml_threshold'] >= threshold_filter]
@@ -99,7 +100,7 @@ if csv_file and optimization_file:
         ax.grid(True)
         st.pyplot(fig)
 
-    with tabs[3]:
+    with tabs[4]:
         st.subheader("📊 Trade Duration Histogram")
         if not trades_df.empty:
             fig2, ax2 = plt.subplots(figsize=(10, 6))
