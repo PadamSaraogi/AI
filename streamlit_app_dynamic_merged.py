@@ -61,15 +61,6 @@ if csv_file and optimization_file:
     st.markdown("⏱️ Signal Timeline")
     st.line_chart(df_signals['signal'])
 
-    # --- Scatter Plot: Confidence vs Signal ---
-    st.markdown("🔬 Confidence vs Signal")
-    fig, ax = plt.subplots(figsize=(10, 5))
-    scatter = ax.scatter(df_signals['confidence'], df_signals['signal'], c=df_signals['signal'], cmap='bwr', alpha=0.5)
-    ax.set_xlabel("Confidence")
-    ax.set_ylabel("Signal")
-    ax.set_title("Confidence vs Signal Scatter Plot")
-    st.pyplot(fig)
-
     # --- Data Preview ---
     st.markdown("📄 Signal Table Preview")
     st.dataframe(df_signals[['predicted_label', 'confidence', 'signal', 'position']].head(100))
