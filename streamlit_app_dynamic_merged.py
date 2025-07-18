@@ -166,6 +166,14 @@ if csv_file and optimization_file:
             st.markdown("#### 💾 Download Trade Data")
             csv_download = trades_df.to_csv(index=False).encode('utf-8')
             st.download_button("Download Trades as CSV", csv_download, file_name="backtest_trades.csv", mime='text/csv')
+
+            # === Win vs Loss Pie Chart ===
+            st.markdown("#### 🥧 Win vs Loss Breakdown")
+            win_loss_counts = trades_df['net_pnl'].apply(lambda x: 'Win' if x > 0 else 'Loss').value_counts()
+            fig2, ax2 = plt.subplots()
+            ax2.pie(win_loss_counts, labels=win_loss_counts.index, autopct='%1.1f%%', colors=['green', 'red'])
+            ax2.set_title("Trade Outcome Distribution")
+            st.pyplot(fig2)
     
         else:
             st.warning("No trades to display. Upload data to begin.")
