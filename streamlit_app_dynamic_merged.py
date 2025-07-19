@@ -12,7 +12,7 @@ st.title("📈 Trading Signal Dashboard")
 # === File Upload Section ===
 st.sidebar.header("Upload Files")
 csv_file = st.sidebar.file_uploader("📂 Upload `5m_signals_enhanced_<STOCK>.csv`", type="csv")
-optimization_file = st.sidebar.file_uploader("📂 Upload `grid_search_results_BEL.csv`", type="csv")
+optimization_file = st.sidebar.file_uploader("📂 Upload `grid_search_results_<STOCK>.csv`", type="csv")
 
 # === File Handling and Backtest ===
 optimization_results = None  # Initialize optimization_results to avoid issues in other tabs
