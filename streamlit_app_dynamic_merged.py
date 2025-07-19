@@ -243,7 +243,6 @@ if csv_file and optimization_file:
                 with tabs[3]:
                     st.subheader("📊 Optimization Results")
                 
-                    if optimization_file is not None:
                         # Load the optimization results CSV (already uploaded)
                         optimization_results = pd.read_csv(optimization_file)
                         st.write("Optimization results loaded successfully!")
@@ -281,9 +280,6 @@ if csv_file and optimization_file:
                             ax2.set_title("Parameter Grid Search - Win Rate")
                             st.pyplot(fig2)
                 
-                    else:
-                        st.warning("No optimization results found. Please upload a valid CSV file.")
-
         except Exception as e:
             st.error(f"An error occurred during file processing or backtesting: {e}")
 
