@@ -281,7 +281,7 @@ if csv_file and optimization_file:
                                     st.pyplot(fig2)
                     
                                     
-                                            if 'param1' in filtered_results.columns and 'param2' in filtered_results.columns:
+                                    if 'param1' in filtered_results.columns and 'param2' in filtered_results.columns:
                                                 st.markdown("#### 📊 Parameter Combination Grid")
                                                 param1_values = filtered_results['param1'].unique()
                                                 param2_values = filtered_results['param2'].unique()
