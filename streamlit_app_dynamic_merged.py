@@ -255,10 +255,6 @@ if csv_file and optimization_file:
                         # Work on a copy to avoid side-effects
                         df_opt = optimization_results.copy()
                 
-                        # Preview the first few rows
-                        st.markdown("**Optimization Results Preview:**")
-                        st.dataframe(df_opt.head())
-                
                         # Confidence threshold slider
                         threshold = st.slider(
                             "Select Confidence Threshold",
