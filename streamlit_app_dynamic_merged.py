@@ -282,4 +282,3 @@ if csv_file and optimization_file:
                         ax2.set_ylabel("Parameter 2")
                         ax2.set_title("Parameter Grid Search - Win Rate")
                         st.pyplot(fig2)
-
