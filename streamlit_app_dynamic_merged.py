@@ -241,8 +241,9 @@ if csv_file and optimization_file:
 
                 with tabs[3]:
                     st.subheader("📊 Optimization Results")
-                   
-                    if optimization_file.empty:
+                        
+                        file_size = optimization_file.size
+                        if file_size == 0:
                         st.warning("Uploaded optimization file is empty.")
                     else:
                         st.write("Optimization results loaded successfully!")
