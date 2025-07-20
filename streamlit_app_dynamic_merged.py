@@ -246,8 +246,9 @@ if csv_file and optimization_file:
                     if file_size == 0:
                         st.warning("Uploaded optimization file is empty.")
                     else:
+                        optimization_file_tab = pd.read_csv(optimization_file)
                         st.write("Optimization results loaded successfully!")
-                        st.write(optimization_file.head())
+                        st.write(optimization_file_tab.head())
                 
                         threshold_filter = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.5)
                         filtered_results = optimization_file_tab[optimization_file_tab['ml_threshold'] >= threshold_filter]
