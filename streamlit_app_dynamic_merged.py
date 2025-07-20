@@ -415,20 +415,20 @@ if csv_file and optimization_file:
                     st.warning("No trades data available to compute risk-adjusted metrics.")
 
                 
-                    # === Advanced Insights: Sharpe Ratio vs Total PnL ===
-                    st.markdown("#### 📊 Sharpe Ratio vs Total PnL")
+                # === Advanced Insights: Sharpe Ratio vs Total PnL ===
+                st.markdown("#### 📊 Sharpe Ratio vs Total PnL")
                 
-                    if not trades_df.empty:
-                        fig, ax = plt.subplots(figsize=(10, 6))
-                        ax.scatter(sharpe_ratio, trades_df['total_pnl'], color='blue', alpha=0.5)
-                        ax.set_xlabel("Sharpe Ratio")
-                        ax.set_ylabel("Total PnL")
-                        ax.set_title("Sharpe Ratio vs Total PnL")
-                        ax.grid(True)
-                        st.pyplot(fig)
+                if not trades_df.empty:
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    ax.scatter(sharpe_ratio, trades_df['total_pnl'], color='blue', alpha=0.5)
+                    ax.set_xlabel("Sharpe Ratio")
+                    ax.set_ylabel("Total PnL")
+                    ax.set_title("Sharpe Ratio vs Total PnL")
+                    ax.grid(True)
+                    st.pyplot(fig)
                 
-                    # === Additional Advanced Insights ===
-                    st.markdown("#### 📊 Advanced Insights")
+                # === Additional Advanced Insights ===
+                st.markdown("#### 📊 Advanced Insights")
                 
-                    # Example: Sharpe Ratio or other risk metrics could be added here
-                    st.write("You can add more advanced risk metrics, such as Sharpe Ratio, Sortino Ratio, and analyze the strategies based on different parameters here.")
+                # Example: Sharpe Ratio or other risk metrics could be added here
+                st.write("You can add more advanced risk metrics, such as Sharpe Ratio, Sortino Ratio, and analyze the strategies based on different parameters here.")
