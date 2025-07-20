@@ -404,6 +404,3 @@ if csv_file and optimization_file:
                     st.write("You can add more advanced risk metrics, such as Sharpe Ratio, Sortino Ratio, and analyze the strategies based on different parameters here.")
 
                 
-        except Exception as e:
-            st.error(f"An error occurred during file processing or backtesting: {e}")
-
