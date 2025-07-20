@@ -241,19 +241,15 @@ if csv_file and optimization_file:
 
                 with tabs[3]:
                     st.subheader("📊 Optimization Results")
-                
-                    try:
-                        # Use the file object directly (again) — only if you insist on re-reading it here
-                        optimization_results_tab = pd.read_csv(optimization_file)
-                
-                        if optimization_results_tab.empty:
+                   
+                        if optimization_file.empty:
                             st.warning("Uploaded optimization file is empty.")
                         else:
                             st.write("Optimization results loaded successfully!")
-                            st.write(optimization_results_tab.head())
+                            st.write(optimization_file.head())
                 
                             threshold_filter = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.5)
-                            filtered_results = optimization_results_tab[optimization_results_tab['ml_threshold'] >= threshold_filter]
+                            filtered_results = optimization_file_tab[optimization_file_tab['ml_threshold'] >= threshold_filter]
                 
                             st.markdown(f"**Showing {len(filtered_results)} results above threshold {threshold_filter:.2f}:**")
                             st.dataframe(filtered_results)
@@ -280,9 +276,6 @@ if csv_file and optimization_file:
                                 ax2.set_ylabel("Parameter 2")
                                 ax2.set_title("Parameter Grid Search - Win Rate")
                                 st.pyplot(fig2)
-                
-                    except pd.errors.EmptyDataError:
-                        st.error("Uploaded optimization file is empty or corrupted.")
 
                 import numpy as np
                 
