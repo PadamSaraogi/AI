@@ -389,30 +389,30 @@ if csv_file and optimization_file:
                     st.markdown("#### 📉 Risk-Adjusted Metrics")
                 if not trades_df.empty:
                 
-                # 4.1 Compute daily returns (fill NaN on first row)
-                trades_df["daily_returns"] = trades_df["net_pnl"].pct_change().fillna(0)
-            
-                # 4.2 Calculate key metrics
-                sharpe_ratio = calculate_sharpe_ratio(trades_df["daily_returns"])
-                sortino_ratio = calculate_sortino_ratio(trades_df["daily_returns"])
+                    # 4.1 Compute daily returns (fill NaN on first row)
+                    trades_df["daily_returns"] = trades_df["net_pnl"].pct_change().fillna(0)
                 
-                # cumulative net PnL series
-                cum_net = trades_df["net_pnl"].cumsum()
-                # normalize for drawdown calculation
-                norm_cum = cum_net / cum_net.iloc[0]
-                max_drawdown = calculate_max_drawdown(norm_cum)
+                    # 4.2 Calculate key metrics
+                    sharpe_ratio = calculate_sharpe_ratio(trades_df["daily_returns"])
+                    sortino_ratio = calculate_sortino_ratio(trades_df["daily_returns"])
+                    
+                    # cumulative net PnL series
+                    cum_net = trades_df["net_pnl"].cumsum()
+                    # normalize for drawdown calculation
+                    norm_cum = cum_net / cum_net.iloc[0]
+                    max_drawdown = calculate_max_drawdown(norm_cum)
+                    
+                    # volatility on daily returns
+                    volatility = calculate_volatility(trades_df["daily_returns"])
                 
-                # volatility on daily returns
-                volatility = calculate_volatility(trades_df["daily_returns"])
-            
-                # 4.3 Display as Streamlit metrics
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Sharpe Ratio",      f"{sharpe_ratio:.2f}")
-                col2.metric("Sortino Ratio",     f"{sortino_ratio:.2f}")
-                col3.metric("Max Drawdown",      f"{max_drawdown:.2%}")
-                col4.metric("Volatility (σ)",    f"{volatility:.2f}")
-            else:
-                st.warning("No trades data available to compute risk-adjusted metrics.")
+                    # 4.3 Display as Streamlit metrics
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("Sharpe Ratio",      f"{sharpe_ratio:.2f}")
+                    col2.metric("Sortino Ratio",     f"{sortino_ratio:.2f}")
+                    col3.metric("Max Drawdown",      f"{max_drawdown:.2%}")
+                    col4.metric("Volatility (σ)",    f"{volatility:.2f}")
+                else:
+                    st.warning("No trades data available to compute risk-adjusted metrics.")
 
                 
                     # === Advanced Insights: Sharpe Ratio vs Total PnL ===
