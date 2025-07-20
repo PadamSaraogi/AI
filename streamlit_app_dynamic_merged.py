@@ -34,40 +34,6 @@ if csv_file and optimization_file:
             else:
                 st.write("Optimization results loaded successfully!")
                 st.write(optimization_results.head())  # Display the first few rows to check the content
-                                # 1) Define ICICI Prime-299 intraday fee calculator
-                def calculate_intraday_fees(entry_price, exit_price, quantity, plan_rate=0.00025):
-                    buy_val   = entry_price  * quantity
-                    sell_val  = exit_price   * quantity
-                
-                    # Brokerage both legs
-                    brok_buy  = plan_rate * buy_val
-                    brok_sell = plan_rate * sell_val
-                
-                    # STT on sell leg
-                    stt       = 0.00025 * sell_val
-                
-                    # Turnover-based charges
-                    turnover  = buy_val + sell_val
-                    exch_fee  = 0.0000297 * turnover    # ₹297/Cr
-                    sebi_fee  = 0.000001  * turnover    # ₹10/Cr
-                
-                    # Stamp duty on buy leg
-                    stamp     = 0.00003 * buy_val       # ₹300/Cr
-                
-                    # GST @18% on brokerage + exch + sebi
-                    gst       = 0.18 * (brok_buy + brok_sell + exch_fee + sebi_fee)
-                
-                    return brok_buy + brok_sell + stt + exch_fee + sebi_fee + stamp + gst
-                
-                # 2) Populate fees column on your trades DataFrame
-                trades_df["fees"] = trades_df.apply(
-                    lambda r: calculate_intraday_fees(
-                        r["entry_price"], r["exit_price"], r["quantity"]
-                    ),
-                    axis=1
-                )
-                
-                # 3) Compute total fees for performance summary
 
                 # === Backtest Simulation ===
                 trades = run_backtest_simulation(df_signals)
@@ -78,7 +44,7 @@ if csv_file and optimization_file:
                 profitable_trades = (trades_df['pnl'] > 0).sum()
                 win_rate = (profitable_trades / total_trades) * 100
                 avg_pnl = trades_df['pnl'].mean()
-                total_fees = trades_df["fees"].sum()
+                total_fees = trades_df['fees'].sum() if 'fees' in trades_df.columns else 0
 
                 # === Tabs Layout using `st.tabs()` ===
                 tabs = st.tabs(["Signals", "Backtest", "Performance", "Optimization", "Insights"])
