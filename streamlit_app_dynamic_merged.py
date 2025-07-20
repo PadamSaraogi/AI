@@ -438,9 +438,3 @@ if csv_file and optimization_file:
                     st.pyplot(fig)
                 else:
                     st.warning("No trades to compute Sharpe vs Total PnL.")
-                    
-                # === Additional Advanced Insights ===
-                st.markdown("#### 📊 Advanced Insights")
-                
-                # Example: Sharpe Ratio or other risk metrics could be added here
-                st.write("You can add more advanced risk metrics, such as Sharpe Ratio, Sortino Ratio, and analyze the strategies based on different parameters here.")
