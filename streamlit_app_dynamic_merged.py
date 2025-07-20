@@ -242,40 +242,40 @@ if csv_file and optimization_file:
                 with tabs[3]:
                     st.subheader("📊 Optimization Results")
                    
-                        if optimization_file.empty:
-                            st.warning("Uploaded optimization file is empty.")
-                        else:
-                            st.write("Optimization results loaded successfully!")
-                            st.write(optimization_file.head())
+                    if optimization_file.empty:
+                        st.warning("Uploaded optimization file is empty.")
+                    else:
+                        st.write("Optimization results loaded successfully!")
+                        st.write(optimization_file.head())
                 
-                            threshold_filter = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.5)
-                            filtered_results = optimization_file_tab[optimization_file_tab['ml_threshold'] >= threshold_filter]
+                        threshold_filter = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.5)
+                        filtered_results = optimization_file_tab[optimization_file_tab['ml_threshold'] >= threshold_filter]
                 
-                            st.markdown(f"**Showing {len(filtered_results)} results above threshold {threshold_filter:.2f}:**")
-                            st.dataframe(filtered_results)
+                        st.markdown(f"**Showing {len(filtered_results)} results above threshold {threshold_filter:.2f}:**")
+                        st.dataframe(filtered_results)
                 
-                            st.markdown("#### 📉 Win Rate vs Total PnL")
-                            fig, ax = plt.subplots(figsize=(10, 6))
-                            ax.scatter(filtered_results['win_rate'], filtered_results['total_pnl'], color='blue', alpha=0.5)
-                            ax.set_xlabel("Win Rate (%)")
-                            ax.set_ylabel("Total PnL")
-                            ax.set_title("Win Rate vs Total PnL")
-                            ax.grid(True)
-                            st.pyplot(fig)
+                        st.markdown("#### 📉 Win Rate vs Total PnL")
+                        fig, ax = plt.subplots(figsize=(10, 6))
+                        ax.scatter(filtered_results['win_rate'], filtered_results['total_pnl'], color='blue', alpha=0.5)
+                        ax.set_xlabel("Win Rate (%)")
+                        ax.set_ylabel("Total PnL")
+                        ax.set_title("Win Rate vs Total PnL")
+                        ax.grid(True)
+                        st.pyplot(fig)
                 
-                            if 'param1' in filtered_results.columns and 'param2' in filtered_results.columns:
-                                st.markdown("#### 📊 Parameter Combination Grid")
-                                param1_values = filtered_results['param1'].unique()
-                                param2_values = filtered_results['param2'].unique()
+                        if 'param1' in filtered_results.columns and 'param2' in filtered_results.columns:
+                            st.markdown("#### 📊 Parameter Combination Grid")
+                            param1_values = filtered_results['param1'].unique()
+                            param2_values = filtered_results['param2'].unique()
                 
-                                fig2, ax2 = plt.subplots(figsize=(10, 6))
-                                pivot_table = filtered_results.pivot(index='param2', columns='param1', values='win_rate')
-                                c = ax2.pcolormesh(pivot_table.columns, pivot_table.index, pivot_table.values, cmap='Blues')
-                                fig2.colorbar(c, ax=ax2)
-                                ax2.set_xlabel("Parameter 1")
-                                ax2.set_ylabel("Parameter 2")
-                                ax2.set_title("Parameter Grid Search - Win Rate")
-                                st.pyplot(fig2)
+                            fig2, ax2 = plt.subplots(figsize=(10, 6))
+                            pivot_table = filtered_results.pivot(index='param2', columns='param1', values='win_rate')
+                            c = ax2.pcolormesh(pivot_table.columns, pivot_table.index, pivot_table.values, cmap='Blues')
+                            fig2.colorbar(c, ax=ax2)
+                            ax2.set_xlabel("Parameter 1")
+                            ax2.set_ylabel("Parameter 2")
+                            ax2.set_title("Parameter Grid Search - Win Rate")
+                            st.pyplot(fig2)
 
                 import numpy as np
                 
