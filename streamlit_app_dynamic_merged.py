@@ -242,42 +242,58 @@ if csv_file and optimization_file:
                 with tabs[3]:
                     st.subheader("📊 Optimization Results")
                         
-                    file_size = optimization_file.size
-                    if file_size == 0:
-                        st.warning("Uploaded optimization file is empty.")
+                    if uploaded_file is None:
+                        st.info("Awaiting file upload…")
+                    elif uploaded_file.size == 0:
+                        st.warning("Uploaded file is empty. Please upload a non-empty CSV.")
                     else:
-                        optimization_file_tab = pd.read_csv(optimization_file)
-                        st.write("Optimization results loaded successfully!")
-                        st.write(optimization_file_tab.head())
-                
-                        threshold_filter = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.5)
-                        filtered_results = optimization_file_tab[optimization_file_tab['ml_threshold'] >= threshold_filter]
-                
-                        st.markdown(f"**Showing {len(filtered_results)} results above threshold {threshold_filter:.2f}:**")
-                        st.dataframe(filtered_results)
-                
-                        st.markdown("#### 📉 Win Rate vs Total PnL")
-                        fig, ax = plt.subplots(figsize=(10, 6))
-                        ax.scatter(filtered_results['win_rate'], filtered_results['total_pnl'], color='blue', alpha=0.5)
-                        ax.set_xlabel("Win Rate (%)")
-                        ax.set_ylabel("Total PnL")
-                        ax.set_title("Win Rate vs Total PnL")
-                        ax.grid(True)
-                        st.pyplot(fig)
-                
-                        if 'param1' in filtered_results.columns and 'param2' in filtered_results.columns:
-                            st.markdown("#### 📊 Parameter Combination Grid")
-                            param1_values = filtered_results['param1'].unique()
-                            param2_values = filtered_results['param2'].unique()
-                
-                            fig2, ax2 = plt.subplots(figsize=(10, 6))
-                            pivot_table = filtered_results.pivot(index='param2', columns='param1', values='win_rate')
-                            c = ax2.pcolormesh(pivot_table.columns, pivot_table.index, pivot_table.values, cmap='Blues')
-                            fig2.colorbar(c, ax=ax2)
-                            ax2.set_xlabel("Parameter 1")
-                            ax2.set_ylabel("Parameter 2")
-                            ax2.set_title("Parameter Grid Search - Win Rate")
-                            st.pyplot(fig2)
+                        try:
+                            df = pd.read_csv(uploaded_file)
+                        except pd.errors.EmptyDataError:
+                            st.warning("No data found in the CSV. Please check your file.")
+                        else:
+                            if df.empty:
+                                st.warning("CSV parsed successfully but contains zero rows.")
+                            else:
+                                st.subheader("📊 Optimization Results")
+                                st.write(df.head())
+                    
+                                threshold = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.5)
+                                filtered = df[df["ml_threshold"] >= threshold]
+                    
+                                st.markdown(f"**Showing {len(filtered)} results above {threshold:.2f}:**")
+                                st.dataframe(filtered)
+                    
+                                # Plot Win Rate vs Total PnL
+                                fig, ax = plt.subplots(figsize=(10, 6))
+                                ax.scatter(filtered["win_rate"], filtered["total_pnl"], alpha=0.5)
+                                ax.set(xlabel="Win Rate (%)", ylabel="Total PnL", title="Win Rate vs Total PnL")
+                                ax.grid(True)
+                                st.pyplot(fig)
+                    
+                                # Optional: parameter grid heatmap
+                                if {"param1", "param2"}.issubset(filtered.columns):
+                                    pivot = filtered.pivot("param2", "param1", "win_rate")
+                                    fig2, ax2 = plt.subplots(figsize=(10, 6))
+                                    c = ax2.pcolormesh(pivot.columns, pivot.index, pivot.values, cmap="Blues")
+                                    fig2.colorbar(c, ax=ax2)
+                                    ax2.set(xlabel="Parameter 1", ylabel="Parameter 2", title="Parameter Grid Search - Win Rate")
+                                    st.pyplot(fig2)
+                    
+                                    
+                                            if 'param1' in filtered_results.columns and 'param2' in filtered_results.columns:
+                                                st.markdown("#### 📊 Parameter Combination Grid")
+                                                param1_values = filtered_results['param1'].unique()
+                                                param2_values = filtered_results['param2'].unique()
+                                    
+                                                fig2, ax2 = plt.subplots(figsize=(10, 6))
+                                                pivot_table = filtered_results.pivot(index='param2', columns='param1', values='win_rate')
+                                                c = ax2.pcolormesh(pivot_table.columns, pivot_table.index, pivot_table.values, cmap='Blues')
+                                                fig2.colorbar(c, ax=ax2)
+                                                ax2.set_xlabel("Parameter 1")
+                                                ax2.set_ylabel("Parameter 2")
+                                                ax2.set_title("Parameter Grid Search - Win Rate")
+                                                st.pyplot(fig2)
 
                 import numpy as np
                 
