@@ -166,7 +166,7 @@ if csv_file and optimization_file:
                         
                         # Plot the three curves
                         fig, ax = plt.subplots(figsize=(12, 5))
-                        aligned_df.set_index('exit_time')['buy_hold_return'].plot(ax=ax, label="Buy & Hold", linestyle='--', color='gray')
+                        aligned_df.set_index('exit_time')['buy_hold_return'].plot(ax=ax, label="Buy & Hold", linestyle='--', color='green')
                         aligned_df.set_index('exit_time')['cumulative_gross'].plot(ax=ax, label="Gross Strategy PnL", color='orange')
                         aligned_df.set_index('exit_time')['cumulative_net'].plot(ax=ax, label="Net Strategy PnL", color='blue')
                         
