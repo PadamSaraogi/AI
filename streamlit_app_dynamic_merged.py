@@ -247,7 +247,7 @@ if csv_file and optimization_file:
                         st.warning("Uploaded optimization file is empty.")
                     else:
                         st.write("Optimization results loaded successfully!")
-                        st.write optimization_file.head
+                        st.write(optimization_file.head())
                 
                         threshold_filter = st.slider("Select Confidence Threshold", 0.0, 1.0, 0.5)
                         filtered_results = optimization_file_tab[optimization_file_tab['ml_threshold'] >= threshold_filter]
