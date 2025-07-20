@@ -97,6 +97,7 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                 total_pnl = pnl_full
 
                 fees = calculate_intraday_fees(entry_price, final_exit_price)
+                print(f"Entry: {entry_price}, Exit: {final_exit_price}, Fees: {fees}, Net PnL: {net_pnl}")
                 net_pnl = total_pnl - fees
 
                 trades.append({
