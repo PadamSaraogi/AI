@@ -387,27 +387,33 @@ if csv_file and optimization_file:
                 
                     # === Risk-Adjusted Metrics ===
                     st.markdown("#### 📉 Risk-Adjusted Metrics")
+                if not trades_df.empty:
                 
-                    if not trades_df.empty:
-                        # Calculate daily returns (if you have minute-by-minute or hourly data, you can adjust accordingly)
-                        trades_df['daily_returns'] = trades_df['net_pnl'].pct_change()
+                # 4.1 Compute daily returns (fill NaN on first row)
+                trades_df["daily_returns"] = trades_df["net_pnl"].pct_change().fillna(0)
+            
+                # 4.2 Calculate key metrics
+                sharpe_ratio = calculate_sharpe_ratio(trades_df["daily_returns"])
+                sortino_ratio = calculate_sortino_ratio(trades_df["daily_returns"])
                 
-                        # Sharpe Ratio
-                        sharpe_ratio = calculate_sharpe_ratio(trades_df['daily_returns'])
-                        st.write(f"**Sharpe Ratio**: {sharpe_ratio:.2f}")
+                # cumulative net PnL series
+                cum_net = trades_df["net_pnl"].cumsum()
+                # normalize for drawdown calculation
+                norm_cum = cum_net / cum_net.iloc[0]
+                max_drawdown = calculate_max_drawdown(norm_cum)
                 
-                        # Sortino Ratio
-                        sortino_ratio = calculate_sortino_ratio(trades_df['daily_returns'])
-                        st.write(f"**Sortino Ratio**: {sortino_ratio:.2f}")
-                
-                        # Maximum Drawdown
-                        cumulative_returns = trades_df['cumulative_net'] / trades_df['cumulative_net'].iloc[0]  # Normalize cumulative PnL
-                        max_drawdown = calculate_max_drawdown(cumulative_returns)
-                        st.write(f"**Maximum Drawdown**: {max_drawdown:.2f}")
-                
-                        # Volatility (Standard Deviation of Returns)
-                        volatility = calculate_volatility(trades_df['daily_returns'])
-                        st.write(f"**Volatility**: {volatility:.2f}")
+                # volatility on daily returns
+                volatility = calculate_volatility(trades_df["daily_returns"])
+            
+                # 4.3 Display as Streamlit metrics
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Sharpe Ratio",      f"{sharpe_ratio:.2f}")
+                col2.metric("Sortino Ratio",     f"{sortino_ratio:.2f}")
+                col3.metric("Max Drawdown",      f"{max_drawdown:.2%}")
+                col4.metric("Volatility (σ)",    f"{volatility:.2f}")
+            else:
+                st.warning("No trades data available to compute risk-adjusted metrics.")
+
                 
                     # === Advanced Insights: Sharpe Ratio vs Total PnL ===
                     st.markdown("#### 📊 Sharpe Ratio vs Total PnL")
