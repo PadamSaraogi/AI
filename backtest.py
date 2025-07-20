@@ -116,4 +116,10 @@ def run_backtest_simulation(df, trail_mult=2.0, time_limit=16, adx_target_mult=2
                 cooldown = COOLDOWN_BARS
                 last_trade_exit = df.index[i]
 
+                # Test fee calc manually
+                if __name__ == "__main__":
+                    test_fee = calculate_intraday_fees(300, 310, 1)
+                    print("Test Fee for Buy 300, Sell 310:", test_fee)
+
+
     return trades
