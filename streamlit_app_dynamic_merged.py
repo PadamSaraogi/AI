@@ -414,19 +414,31 @@ if csv_file and optimization_file:
                 else:
                     st.warning("No trades data available to compute risk-adjusted metrics.")
 
-                
-                # === Advanced Insights: Sharpe Ratio vs Total PnL ===
-                st.markdown("#### 📊 Sharpe Ratio vs Total PnL")
+                            
+                # === Advanced Insights: Sharpe Ratio vs Total Net PnL ===
+                st.markdown("#### 📊 Sharpe Ratio vs Total Net PnL")
                 
                 if not trades_df.empty:
+                    # 1) Compute total net PnL
+                    total_net_pnl = trades_df["net_pnl"].sum()
+                
+                    # 2) Plot a single point [Sharpe, Total Net PnL]
                     fig, ax = plt.subplots(figsize=(10, 6))
-                    ax.scatter(sharpe_ratio, trades_df['total_pnl'], color='blue', alpha=0.5)
+                    ax.scatter(
+                        [sharpe_ratio],        # X-axis: single Sharpe ratio value
+                        [total_net_pnl],       # Y-axis: total net PnL
+                        color="blue",
+                        alpha=0.7,
+                        s=100                  # marker size for visibility
+                    )
                     ax.set_xlabel("Sharpe Ratio")
-                    ax.set_ylabel("Total PnL")
-                    ax.set_title("Sharpe Ratio vs Total PnL")
+                    ax.set_ylabel("Total Net PnL")
+                    ax.set_title("Sharpe Ratio vs Total Net PnL")
                     ax.grid(True)
                     st.pyplot(fig)
-                
+                else:
+                    st.warning("No trades to compute Sharpe vs Total PnL.")
+                    
                 # === Additional Advanced Insights ===
                 st.markdown("#### 📊 Advanced Insights")
                 
