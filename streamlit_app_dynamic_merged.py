@@ -179,6 +179,10 @@ with tabs[2]:
         )
         aligned_df.set_index("exit_time")["cumulative_gross"].plot(ax=ax, label="Gross Strategy PnL", color="orange")
         aligned_df.set_index("exit_time")["cumulative_net"].plot(ax=ax, label="Net Strategy PnL", color="blue")
+        
+        import matplotlib.ticker as ticker
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
+        
         ax.set_title("Cumulative Returns: Strategy vs Buy & Hold")
         ax.set_ylabel("₹ Value")
         ax.set_xlabel("Date")
