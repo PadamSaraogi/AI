@@ -173,22 +173,21 @@ with tabs[2]:
             how="inner",
         )
             
-            fig, ax = plt.subplots(figsize=(12, 5))
-            aligned_df.set_index("exit_time")["buy_hold_return"].plot(
-                ax=ax, label="Buy & Hold", linestyle="--", color="green"
-            )
-            aligned_df.set_index("exit_time")["cumulative_gross"].plot(ax=ax, label="Gross Strategy PnL", color="orange")
-            aligned_df.set_index("exit_time")["cumulative_net"].plot(ax=ax, label="Net Strategy PnL", color="blue")
+        fig, ax = plt.subplots(figsize=(12, 5))
+        aligned_df.set_index("exit_time")["buy_hold_return"].plot(
+        ax=ax, label="Buy & Hold", linestyle="--", color="green")
+        aligned_df.set_index("exit_time")["cumulative_gross"].plot(ax=ax, label="Gross Strategy PnL", color="orange")
+        aligned_df.set_index("exit_time")["cumulative_net"].plot(ax=ax, label="Net Strategy PnL", color="blue")
             
-            import matplotlib.ticker as ticker
-            ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
+        import matplotlib.ticker as ticker
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
             
-            ax.set_title("Cumulative Returns: Strategy vs Buy & Hold")
-            ax.set_ylabel("₹ Value")
-            ax.set_xlabel("Date")
-            ax.legend()
-            ax.grid(True)
-            st.pyplot(fig)
+        ax.set_title("Cumulative Returns: Strategy vs Buy & Hold")
+        ax.set_ylabel("₹ Value")
+        ax.set_xlabel("Date")
+        ax.legend()
+        ax.grid(True)
+        st.pyplot(fig)
 
         best_trade = trades_df_sort.loc[trades_df_sort["net_pnl"].idxmax()]
         worst_trade = trades_df_sort.loc[trades_df_sort["net_pnl"].idxmin()]
