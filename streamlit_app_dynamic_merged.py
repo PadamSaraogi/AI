@@ -182,7 +182,7 @@ with tabs[2]:
     else:
             st.warning("No trades to display. Upload data and run backtest.")
 
-        st.markdown("#### 📊 Cumulative Gross vs Net vs Buy & Hold")
+    st.markdown("#### 📊 Cumulative Gross vs Net vs Buy & Hold")
 
         trades_df_sort = trades_df.sort_values("exit_time")
         trades_df_sort["cumulative_gross"] = trades_df_sort["pnl"].cumsum()
