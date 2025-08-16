@@ -212,6 +212,18 @@ with tabs[2]:
         colB.error("**Worst Trade**")
         colB.json(worst_trade.to_dict())
 
+            st.subheader("📊 Stock Price Chart")
+        if csv_file and "close" in df_signals.columns:
+            fig, ax = plt.subplots(figsize=(12, 5))
+            df_signals["close"].plot(ax=ax, color="dodgerblue", linewidth=2)
+            ax.set_title("Stock Price Over Time")
+            ax.set_ylabel("Price (₹)")
+            ax.set_xlabel("Date")
+            ax.grid(True)
+            st.pyplot(fig)
+        else:
+            st.warning("No price data to display. Upload a valid signal CSV.")
+
         # === PnL Waterfall Chart ===
         st.markdown("#### 🚰 Trade PnL Waterfall Chart")
         fig, ax = plt.subplots(figsize=(12, 5))
