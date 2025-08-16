@@ -4,32 +4,32 @@ import numpy as np
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 
-from backtest import run_backtest_simulation  # Make sure backtest.py is in the same directory or in PYTHONPATH
+from backtest import run_backtest_simulation  # Ensure backtest.py is accessible
+
 
 # === Streamlit Configuration ===
 st.set_page_config(layout="wide")
-st.title("📈 Trading Signal Dashboard with ATR Position Sizing")
+st.title("📈 Trading Signal Dashboard with ATR Position Sizing and Buy & Hold")
 
-# === File Upload Section ===
+
+# === Sidebar: File Upload and Parameters ===
 st.sidebar.header("Upload Files")
-
 csv_file = st.sidebar.file_uploader("📂 Upload `5m_signals_enhanced_.csv`", type="csv")
 optimization_file = st.sidebar.file_uploader("📂 Upload `grid_search_results_.csv`", type="csv")
 
-# === Parameter Sliders for Position Sizing ===
 st.sidebar.header("Position Sizing Parameters")
-
 starting_capital = st.sidebar.number_input(
     "Starting Capital (₹)", min_value=10000, value=100000, step=5000
 )
-
 risk_per_trade_percent = st.sidebar.slider(
     "Risk per Trade (%)", min_value=0.1, max_value=10.0, value=1.0, step=0.1
 )
-risk_per_trade = risk_per_trade_percent / 100  # Convert to decimal for backtest
+risk_per_trade = risk_per_trade_percent / 100  # decimal
 
-# === Load & Validate Files ===
-optimization_results = None  # Initialize to avoid errors in other tabs
+
+# === Load Data and Run Backtest ===
+optimization_results = None
+df_signals, trades_df = None, None
 
 if csv_file and optimization_file:
     if optimization_file.size == 0:
@@ -37,7 +37,6 @@ if csv_file and optimization_file:
     else:
         df_signals = pd.read_csv(csv_file, parse_dates=["datetime"])
         df_signals.set_index("datetime", inplace=True)
-
         optimization_results = pd.read_csv(optimization_file)
         if optimization_results.empty:
             st.warning("The uploaded optimization file is empty. Please upload a valid file.")
@@ -45,32 +44,21 @@ if csv_file and optimization_file:
             st.write("Optimization results loaded successfully!")
             st.write(optimization_results.head())
 
-        # Run the backtest with user-specified capital and risk values
         trades = run_backtest_simulation(
             df_signals,
-            trail_mult=2.0,
-            time_limit=16,
-            adx_target_mult=2.5,
-            starting_capital=starting_capital,
-            risk_per_trade=risk_per_trade,
+            trail_mult=2.0, time_limit=16, adx_target_mult=2.5,
+            starting_capital=starting_capital, risk_per_trade=risk_per_trade
         )
         trades_df = pd.DataFrame(trades)
 
-        # Display KPIs and Visualizations
-        # === Performance Summary ===
-        total_trades = len(trades_df)
-        profitable_trades = (trades_df["pnl"] > 0).sum()
-        win_rate = (profitable_trades / total_trades) * 100 if total_trades > 0 else 0
-        avg_pnl = trades_df["pnl"].mean() if total_trades > 0 else 0
-        total_fees = trades_df["fees"].sum() if "fees" in trades_df.columns else 0
 
-# === Tabs for UI ===
+# === Tabs ===
 tabs = st.tabs(["Signals", "Backtest", "Performance", "Optimization", "Insights"])
 
+# ----- Tab 0: Signals -----
 with tabs[0]:
     st.subheader("🔍 Enhanced Signals Data Exploration")
     if csv_file:
-        # Filter Controls
         min_date, max_date = df_signals.index.min(), df_signals.index.max()
         date_range = st.date_input("📅 Filter by Date Range", [min_date, max_date])
         filtered_signals = df_signals
@@ -94,10 +82,11 @@ with tabs[0]:
     else:
         st.info("Upload a signal CSV file to start.")
 
+
+# ----- Tab 1: Backtest -----
 with tabs[1]:
     st.subheader("📊 Backtest Trade Explorer")
     if csv_file and trades_df is not None and not trades_df.empty:
-        # Filter trades
         trade_type = st.selectbox("Trade Type", options=["All", "Buy", "Short Sell"])
         min_dur, max_dur = int(trades_df["duration_min"].min()), int(trades_df["duration_min"].max())
         dur_range = st.slider("Trade Duration (minutes)", min_dur, max_dur, (min_dur, max_dur))
@@ -110,7 +99,6 @@ with tabs[1]:
         ]
 
         st.write(f"📦 Showing {len(filtered_trades)} trades")
-
         st.markdown("#### 📄 Filtered Trade Log")
         st.dataframe(filtered_trades.sort_values(by="exit_time", ascending=False).reset_index(drop=True))
 
@@ -147,9 +135,16 @@ with tabs[1]:
     else:
         st.info("Upload signal CSV and generate trades to view this tab.")
 
+
+# ----- Tab 2: Performance -----
 with tabs[2]:
     st.subheader("📈 Strategy Performance Summary")
     if csv_file and trades_df is not None and not trades_df.empty:
+        total_trades = len(trades_df)
+        profitable_trades = (trades_df["pnl"] > 0).sum()
+        win_rate = (profitable_trades / total_trades) * 100 if total_trades > 0 else 0
+        total_fees = trades_df["fees"].sum() if "fees" in trades_df.columns else 0
+
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         col1.metric("Total Trades", total_trades)
         col2.metric("Win Rate", f"{win_rate:.2f}%")
@@ -160,15 +155,18 @@ with tabs[2]:
 
         st.markdown("#### 📊 Cumulative Gross vs Net vs Buy & Hold")
 
-        trades_df = trades_df.sort_values("exit_time")
-        trades_df["cumulative_gross"] = trades_df["pnl"].cumsum()
-        trades_df["cumulative_net"] = trades_df["net_pnl"].cumsum()
+        trades_df_sort = trades_df.sort_values("exit_time")
+        trades_df_sort["cumulative_gross"] = trades_df_sort["pnl"].cumsum()
+        trades_df_sort["cumulative_net"] = trades_df_sort["net_pnl"].cumsum()
 
+        # Buy & Hold with max shares purchasable
         start_price = df_signals["close"].iloc[0]
-        df_signals["buy_hold_return"] = df_signals["close"] - start_price
+        max_qty_buyhold = int(starting_capital // start_price)
+        leftover_cash = starting_capital - max_qty_buyhold * start_price
+        df_signals["buy_hold_return"] = (df_signals["close"] - start_price) * max_qty_buyhold
 
         aligned_df = pd.merge(
-            trades_df[["exit_time", "cumulative_gross", "cumulative_net"]],
+            trades_df_sort[["exit_time", "cumulative_gross", "cumulative_net"]],
             df_signals[["buy_hold_return"]],
             left_on="exit_time",
             right_index=True,
@@ -188,8 +186,8 @@ with tabs[2]:
         ax.grid(True)
         st.pyplot(fig)
 
-        best_trade = trades_df.loc[trades_df["net_pnl"].idxmax()]
-        worst_trade = trades_df.loc[trades_df["net_pnl"].idxmin()]
+        best_trade = trades_df_sort.loc[trades_df_sort["net_pnl"].idxmax()]
+        worst_trade = trades_df_sort.loc[trades_df_sort["net_pnl"].idxmin()]
 
         colA, colB = st.columns(2)
         colA.success("**Best Trade**")
@@ -201,14 +199,14 @@ with tabs[2]:
         fig, ax = plt.subplots(figsize=(12, 5))
         cumulative = 0
         bottoms = []
-        for pnl in trades_df["net_pnl"]:
+        for pnl in trades_df_sort["net_pnl"]:
             bottoms.append(cumulative)
             cumulative += pnl
         ax.bar(
-            range(len(trades_df)),
-            trades_df["net_pnl"],
+            range(len(trades_df_sort)),
+            trades_df_sort["net_pnl"],
             bottom=bottoms,
-            color=["green" if x >= 0 else "red" for x in trades_df["net_pnl"]],
+            color=["green" if x >= 0 else "red" for x in trades_df_sort["net_pnl"]],
         )
         ax.set_title("Trade-by-Trade PnL Contribution")
         ax.set_xlabel("Trade Index")
@@ -216,10 +214,10 @@ with tabs[2]:
         st.pyplot(fig)
 
         st.markdown("#### 🥧 Win vs Loss Breakdown")
-        win_loss_counts = trades_df["net_pnl"].apply(lambda x: "Win" if x > 0 else "Loss").value_counts()
+        win_loss_counts = trades_df_sort["net_pnl"].apply(lambda x: "Win" if x > 0 else "Loss").value_counts()
         labels = win_loss_counts.index.tolist()
         sizes = win_loss_counts.values
-        colors = ["#4CAF50", "#F44336"]  # Green for wins, red for losses
+        colors = ["#4CAF50", "#F44336"]
         fig = go.Figure(
             data=[
                 go.Pie(
@@ -238,8 +236,11 @@ with tabs[2]:
     else:
         st.warning("No trades to display. Upload data and run backtest.")
 
+
+# ----- Tab 3: Optimization -----
 with tabs[3]:
     st.subheader("📊 Optimization Results")
+
     if optimization_results is None:
         st.info("Awaiting optimization file upload…")
     elif optimization_results.empty:
@@ -269,6 +270,8 @@ with tabs[3]:
             ax2.set_title("Parameter Grid Search – Win Rate Heatmap")
             st.pyplot(fig2)
 
+
+# ----- Tab 4: Insights -----
 with tabs[4]:
     st.subheader("📊 Insights")
     if csv_file and trades_df is not None and not trades_df.empty:
@@ -338,7 +341,6 @@ with tabs[4]:
         col3.metric("Max Drawdown", f"{max_drawdown:.2%}")
         col4.metric("Volatility (σ)", f"{volatility:.2f}")
 
-        # Sharpe vs Total Net PnL scatter
         total_net_pnl = trades_df["net_pnl"].sum()
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.scatter([sharpe_ratio], [total_net_pnl], color="blue", alpha=0.7, s=100)
