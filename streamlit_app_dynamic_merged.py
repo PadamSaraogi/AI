@@ -179,7 +179,7 @@ with tabs[2]:
     
             # Plotting cumulative returns chart as before (remember to keep your existing plotting code here)
             # ...
-        else:
+    else:
             st.warning("No trades to display. Upload data and run backtest.")
 
         st.markdown("#### 📊 Cumulative Gross vs Net vs Buy & Hold")
