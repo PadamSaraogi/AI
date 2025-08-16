@@ -153,11 +153,13 @@ with tabs[2]:
         net_return_pct = (net_pnl / initial_capital) * 100
 
         # Buy & Hold
-        start_price = df_signals["close"].iloc[1]   # Row 2 for opening price
-        end_price = df_signals["close"].iloc[-1]    # Last row for exit price
-        
-        buy_hold_return_pct = ((end_price - start_price) / start_price) * 100
-
+        start_price = df_signals["close"].iloc[1]
+        max_qty_buyhold = int(initial_capital // start_price)
+        leftover_cash = initial_capital - max_qty_buyhold * start_price
+        end_price = df_signals["close"].iloc[-1]
+        buy_hold_pnl = (end_price - start_price) * max_qty_buyhold
+        buy_hold_total_value = buy_hold_pnl + leftover_cash
+        buy_hold_return_pct = ((buy_hold_total_value - initial_capital) / initial_capital) * 100
 
         # Two rows of metrics
         col1, col2, col3 = st.columns(3)
