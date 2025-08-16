@@ -164,13 +164,16 @@ with tabs[2]:
         # Two rows of metrics
         col1, col2, col3 = st.columns(3)
         col4, col5, col6 = st.columns(3)
+        col7, col8, col9 = st.columns(3)
         col1.metric("Total Trades", total_trades)
         col2.metric("Win Rate", f"{win_rate:.2f}%")
         col3.metric("Avg Duration", f"{trades_df['duration_min'].mean():.1f} min")
-        col4.metric("Gross PnL", f"₹{gross_pnl:,.2f} ({gross_return_pct:.2f}%)")
-        col5.metric("Net PnL", f"₹{net_pnl:,.2f} ({net_return_pct:.2f}%)")
+        col4.metric("Gross PnL", f"₹{gross_pnl:,.2f}")
+        col5.metric("Net PnL", f"₹{net_pnl:,.2f}")
         col6.metric("Total Fees", f"₹{total_fees:,.2f}")
-        st.markdown(f"**Buy & Hold Return:** {buy_hold_return_pct:.2f}%")
+        col7.metric("Buy & Hold Return", f"{buy_hold_return_pct:.2f}%")
+        col8.metric("Gross % Return", f"{gross_return_pct:.2f}%")
+        col9.metric("Net % Return", f"{net_return_pct:.2f}%")
 
         # Cumulative returns chart
         trades_df_sort = trades_df.sort_values("exit_time")
