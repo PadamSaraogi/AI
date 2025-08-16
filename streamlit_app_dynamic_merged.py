@@ -140,18 +140,47 @@ with tabs[1]:
 with tabs[2]:
     st.subheader("📈 Strategy Performance Summary")
     if csv_file and trades_df is not None and not trades_df.empty:
-        total_trades = len(trades_df)
-        profitable_trades = (trades_df["pnl"] > 0).sum()
-        win_rate = (profitable_trades / total_trades) * 100 if total_trades > 0 else 0
-        total_fees = trades_df["fees"].sum() if "fees" in trades_df.columns else 0
-
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        col1.metric("Total Trades", total_trades)
-        col2.metric("Win Rate", f"{win_rate:.2f}%")
-        col3.metric("Avg Duration", f"{trades_df['duration_min'].mean():.1f} min")
-        col4.metric("Gross PnL", f"{trades_df['pnl'].sum():.2f}")
-        col5.metric("Net PnL", f"{trades_df['net_pnl'].sum():.2f}")
-        col6.metric("Total Fees", f"{total_fees:.2f}")
+            total_trades = len(trades_df)
+            profitable_trades = (trades_df["pnl"] > 0).sum()
+            win_rate = (profitable_trades / total_trades) * 100 if total_trades > 0 else 0
+            total_fees = trades_df["fees"].sum() if "fees" in trades_df.columns else 0
+    
+            # Calculate percentage returns relative to starting capital
+            initial_capital = starting_capital  # from sidebar input
+    
+            gross_pnl = trades_df["pnl"].sum()
+            net_pnl = trades_df["net_pnl"].sum()
+            gross_return_pct = (gross_pnl / initial_capital) * 100
+            net_return_pct = (net_pnl / initial_capital) * 100
+    
+            # Buy & Hold return percentage
+            start_price = df_signals["close"].iloc[0]
+            max_qty_buyhold = int(initial_capital // start_price)
+            leftover_cash = initial_capital - max_qty_buyhold * start_price
+            end_price = df_signals["close"].iloc[-1]
+            buy_hold_pnl = (end_price - start_price) * max_qty_buyhold
+            buy_hold_total_value = buy_hold_pnl + leftover_cash
+            buy_hold_return_pct = ((buy_hold_total_value - initial_capital) / initial_capital) * 100
+    
+            # Split 6 metrics into two rows with 3 columns each
+            col1, col2, col3 = st.columns(3)
+            col4, col5, col6 = st.columns(3)
+    
+            col1.metric("Total Trades", total_trades)
+            col2.metric("Win Rate", f"{win_rate:.2f}%")
+            col3.metric("Avg Duration", f"{trades_df['duration_min'].mean():.1f} min")
+    
+            col4.metric("Gross PnL", f"₹{gross_pnl:,.2f} ({gross_return_pct:.2f}%)")
+            col5.metric("Net PnL", f"₹{net_pnl:,.2f} ({net_return_pct:.2f}%)")
+            col6.metric("Total Fees", f"₹{total_fees:,.2f}")
+    
+            # Add an extra row for Buy & Hold return percentage
+            st.markdown(f"**Buy & Hold Return:** {buy_hold_return_pct:.2f}%")
+    
+            # Plotting cumulative returns chart as before (remember to keep your existing plotting code here)
+            # ...
+        else:
+            st.warning("No trades to display. Upload data and run backtest.")
 
         st.markdown("#### 📊 Cumulative Gross vs Net vs Buy & Hold")
 
