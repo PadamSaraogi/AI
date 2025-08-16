@@ -159,7 +159,7 @@ with tabs[2]:
         end_price = df_signals["close"].iloc[-1]
         buy_hold_pnl = (end_price - start_price) * max_qty_buyhold
         buy_hold_total_value = buy_hold_pnl + leftover_cash
-        buy_hold_return_pct = ((end_price - start_price) / start_price) * 100)
+        buy_hold_return_pct = ((end_price - start_price) / start_price) * 100
 
         # Two rows of metrics
         col1, col2, col3 = st.columns(3)
