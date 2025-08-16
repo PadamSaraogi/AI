@@ -145,15 +145,14 @@ with tabs[2]:
         win_rate = (profitable_trades / total_trades) * 100 if total_trades > 0 else 0
         total_fees = trades_df["fees"].sum() if "fees" in trades_df.columns else 0
 
-        # Calculate percentage returns relative to starting capital
-        initial_capital = starting_capital  # from sidebar input
-
+        # Calculate percentage returns
+        initial_capital = starting_capital
         gross_pnl = trades_df["pnl"].sum()
         net_pnl = trades_df["net_pnl"].sum()
         gross_return_pct = (gross_pnl / initial_capital) * 100
         net_return_pct = (net_pnl / initial_capital) * 100
 
-        # Buy & Hold return percentage
+        # Buy & Hold
         start_price = df_signals["close"].iloc[0]
         max_qty_buyhold = int(initial_capital // start_price)
         leftover_cash = initial_capital - max_qty_buyhold * start_price
@@ -162,53 +161,102 @@ with tabs[2]:
         buy_hold_total_value = buy_hold_pnl + leftover_cash
         buy_hold_return_pct = ((buy_hold_total_value - initial_capital) / initial_capital) * 100
 
-        # Split 6 metrics into two rows with 3 columns each
+        # Two rows of metrics
         col1, col2, col3 = st.columns(3)
         col4, col5, col6 = st.columns(3)
-
         col1.metric("Total Trades", total_trades)
         col2.metric("Win Rate", f"{win_rate:.2f}%")
         col3.metric("Avg Duration", f"{trades_df['duration_min'].mean():.1f} min")
-
         col4.metric("Gross PnL", f"₹{gross_pnl:,.2f} ({gross_return_pct:.2f}%)")
         col5.metric("Net PnL", f"₹{net_pnl:,.2f} ({net_return_pct:.2f}%)")
         col6.metric("Total Fees", f"₹{total_fees:,.2f}")
-
-        # Add Buy & Hold return percentage below metrics
         st.markdown(f"**Buy & Hold Return:** {buy_hold_return_pct:.2f}%")
 
-        # Plot cumulative returns chart
+        # Cumulative returns chart
         trades_df_sort = trades_df.sort_values("exit_time")
         trades_df_sort["cumulative_gross"] = trades_df_sort["pnl"].cumsum()
         trades_df_sort["cumulative_net"] = trades_df_sort["net_pnl"].cumsum()
-
         df_signals["buy_hold_return"] = (df_signals["close"] - start_price) * max_qty_buyhold
 
         aligned_df = pd.merge(
             trades_df_sort[["exit_time", "cumulative_gross", "cumulative_net"]],
             df_signals[["buy_hold_return"]],
-            left_on="exit_time",
-            right_index=True,
-            how="inner",
+            left_on="exit_time", right_index=True, how="inner"
         )
 
         import matplotlib.ticker as ticker
-
         fig, ax = plt.subplots(figsize=(12, 5))
         aligned_df.set_index("exit_time")["buy_hold_return"].plot(
             ax=ax, label="Buy & Hold", linestyle="--", color="green"
         )
         aligned_df.set_index("exit_time")["cumulative_gross"].plot(ax=ax, label="Gross Strategy PnL", color="orange")
         aligned_df.set_index("exit_time")["cumulative_net"].plot(ax=ax, label="Net Strategy PnL", color="blue")
-
         ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
-
         ax.set_title("Cumulative Returns: Strategy vs Buy & Hold")
         ax.set_ylabel("₹ Value")
         ax.set_xlabel("Date")
         ax.legend()
         ax.grid(True)
         st.pyplot(fig)
+
+        # === Best & Worst Trades ===
+        st.markdown("#### 🏆 Best and Worst Trades")
+        colA, colB = st.columns(2)
+        best_trade = trades_df.loc[trades_df['net_pnl'].idxmax()]
+        worst_trade = trades_df.loc[trades_df['net_pnl'].idxmin()]
+        colA.success("**Best Trade**")
+        colA.json(best_trade.to_dict())
+        colB.error("**Worst Trade**")
+        colB.json(worst_trade.to_dict())
+
+        # === PnL Waterfall Chart ===
+        st.markdown("#### 🚰 Trade PnL Waterfall Chart")
+        fig, ax = plt.subplots(figsize=(12, 5))
+        cumulative = 0
+        bottoms = []
+        for pnl in trades_df['net_pnl']:
+            bottoms.append(cumulative)
+            cumulative += pnl
+        ax.bar(
+            range(len(trades_df)),
+            trades_df['net_pnl'],
+            bottom=bottoms,
+            color=['green' if x >= 0 else 'red' for x in trades_df['net_pnl']]
+        )
+        ax.set_title("Trade-by-Trade PnL Contribution")
+        ax.set_xlabel("Trade Index")
+        ax.set_ylabel("Net PnL")
+        st.pyplot(fig)
+
+        # === Download Button ===
+        st.markdown("#### 💾 Download Trade Data")
+        csv_download = trades_df.to_csv(index=False).encode('utf-8')
+        st.download_button("Download Trades as CSV", csv_download, file_name="backtest_trades.csv", mime='text/csv')
+
+        # === Win vs Loss Breakdown (Plotly) ===
+        st.markdown("#### 🥧 Win vs Loss Breakdown")
+        win_loss_counts = trades_df['net_pnl'].apply(lambda x: 'Win' if x > 0 else 'Loss').value_counts()
+        labels = win_loss_counts.index.tolist()
+        sizes = win_loss_counts.values
+        colors = ['#4CAF50', '#F44336']  # Green for wins, red for losses
+
+        fig = go.Figure(data=[go.Pie(
+            labels=labels,
+            values=sizes,
+            textinfo='label+percent+value',
+            marker=dict(colors=colors),
+            hoverinfo='label+percent+value',
+            hole=0.3,
+            pull=[0.1 if label == 'Win' else 0 for label in labels],
+        )])
+        fig.update_layout(
+            title="Trade Outcome Distribution",
+            title_x=0.5,
+            template="plotly_dark",
+            showlegend=False
+        )
+        st.plotly_chart(fig)
+
     else:
         st.warning("No trades to display. Upload data and run backtest.")
 
