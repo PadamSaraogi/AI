@@ -266,8 +266,6 @@ with tabs[2]:
         )
         fig.update_layout(title="Trade Outcome Distribution", title_x=0.5, template="plotly_dark", showlegend=False)
         st.plotly_chart(fig)
-    else:
-        st.warning("No trades to display. Upload data and run backtest.")
 
 
 # ----- Tab 3: Optimization -----
