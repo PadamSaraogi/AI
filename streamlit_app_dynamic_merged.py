@@ -212,7 +212,7 @@ with tabs[2]:
         colB.error("**Worst Trade**")
         colB.json(worst_trade.to_dict())
 
-            st.subheader("📊 Stock Price Chart")
+        st.subheader("📊 Stock Price Chart")
         if csv_file and "close" in df_signals.columns:
             fig, ax = plt.subplots(figsize=(12, 5))
             df_signals["close"].plot(ax=ax, color="dodgerblue", linewidth=2)
