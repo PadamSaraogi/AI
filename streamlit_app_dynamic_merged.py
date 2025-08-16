@@ -139,7 +139,7 @@ with tabs[1]:
 # ----- Tab 2: Performance -----
 with tabs[2]:
     st.subheader("📈 Strategy Performance Summary")
-    if csv_file and trades_df is not None and not trades_df.empty:
+        if csv_file and trades_df is not None and not trades_df.empty:
             total_trades = len(trades_df)
             profitable_trades = (trades_df["pnl"] > 0).sum()
             win_rate = (profitable_trades / total_trades) * 100 if total_trades > 0 else 0
@@ -179,10 +179,10 @@ with tabs[2]:
     
             # Plotting cumulative returns chart as before (remember to keep your existing plotting code here)
             # ...
-    else:
+        else:
             st.warning("No trades to display. Upload data and run backtest.")
 
-    st.markdown("#### 📊 Cumulative Gross vs Net vs Buy & Hold")
+        st.markdown("#### 📊 Cumulative Gross vs Net vs Buy & Hold")
 
         trades_df_sort = trades_df.sort_values("exit_time")
         trades_df_sort["cumulative_gross"] = trades_df_sort["pnl"].cumsum()
