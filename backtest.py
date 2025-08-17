@@ -26,7 +26,7 @@ def run_backtest_simulation(
     COOLDOWN_BARS = 0
     STOP_MULT = 1.0
     EXIT_TIME = pd.to_datetime("15:25:00").time()
-    REENTER_TIME = pd.to_datetime("09:00:00").time()
+    REENTER_TIME = pd.to_datetime("09:25:00").time()
     last_trade_exit = None
     entry_price = None
     entry_sig = None
@@ -44,6 +44,11 @@ def run_backtest_simulation(
         adx = df['ADX14'].iat[i]
         trade_time = df.index[i].time()
         trade_date = df.index[i].date()
+
+        # Prevent trades before 9:20am (add this line if needed)
+        ALLOW_TRADING_AFTER = pd.to_datetime("09:20:00").time()
+        if trade_time <= ALLOW_TRADING_AFTER:
+            continue
 
         # Optional: Restrict new trades to after previous day's exit.
         if last_trade_exit and trade_time >= REENTER_TIME and trade_date > last_trade_exit.date():
@@ -134,6 +139,7 @@ def run_backtest_simulation(
                 in_trade = False
                 last_trade_exit = df.index[i]
                 position_size = None  # reset position
+
     return trades
 
 # Test block/example (optional):
