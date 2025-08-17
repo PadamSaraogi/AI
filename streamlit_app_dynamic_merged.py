@@ -9,7 +9,7 @@ from backtest import run_backtest_simulation  # Ensure backtest.py is accessible
 
 # === Streamlit Configuration ===
 st.set_page_config(layout="wide")
-st.title("📈 Trading Signal Dashboard with ATR Position Sizing and Buy & Hold")
+st.title("📈 Trading Signal Dashboard")
 
 
 # === Sidebar: File Upload and Parameters ===
