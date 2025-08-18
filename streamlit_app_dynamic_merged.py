@@ -3,11 +3,10 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
-from backtest import run_backtest_simulation  # Must be in your project
+from backtest import run_backtest_simulation
 
 st.set_page_config(layout="wide")
-st.markdown(
-    """
+st.markdown("""
     <div style='display: flex; align-items: center;'>
       <img src='https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/React-icon.svg/512px-React-icon.svg.png' width='60'>
       <h1 style='margin-left: 18px;'>Multi-Stock Trading Dashboard</h1>
@@ -48,7 +47,7 @@ tabs = st.tabs([
     "All Equity Curves"
 ])
 
-# ===== Portfolio Overview Tab =====
+# = Portfolio Overview Tab =
 with tabs[0]:
     if n_stocks == 0:
         st.warning("Upload matching pairs for each stock.")
@@ -65,6 +64,8 @@ with tabs[0]:
             capital_per_stock = total_portfolio_capital // n_stocks
             all_trades = {}
             all_equity_curves = {}
+
+            # Run backtest and tag trades with their symbol
             for symbol in included_symbols:
                 df_signals = stock_data[symbol]['signals']
                 trades_df, equity_curve = run_backtest_simulation(
@@ -72,6 +73,7 @@ with tabs[0]:
                     starting_capital=capital_per_stock,
                     risk_per_trade=risk_per_trade
                 )
+                trades_df['symbol'] = symbol  # <-- Tag each trade with symbol for later use
                 all_trades[symbol] = trades_df
                 all_equity_curves[symbol] = equity_curve
 
@@ -79,9 +81,9 @@ with tabs[0]:
             portfolio_equity = None
             for eq in all_equity_curves.values():
                 portfolio_equity = eq if portfolio_equity is None else portfolio_equity.add(eq, fill_value=0)
+
             total_trades = sum([len(t) for t in all_trades.values()])
             total_net_pnl = sum([t['net_pnl'].sum() for t in all_trades.values()])
-
             # Portfolio-wide metrics
             if portfolio_equity is not None:
                 daily_returns = portfolio_equity.pct_change().fillna(0)
@@ -103,7 +105,7 @@ with tabs[0]:
             c4.metric("Sharpe Ratio", f"{sharpe:.2f}" if not np.isnan(sharpe) else "N/A")
             c5.metric("Sortino Ratio", f"{sortino:.2f}" if not np.isnan(sortino) else "N/A")
 
-            # Portfolio-wide waterfall chart
+            # Portfolio-wide waterfall chart with Buy & Hold line
             all_trades_combined = pd.concat(all_trades.values()).sort_values("exit_time")
             if not all_trades_combined.empty:
                 cum = 0
@@ -111,16 +113,49 @@ with tabs[0]:
                 for pnl in all_trades_combined["net_pnl"]:
                     bottoms.append(cum)
                     cum += pnl
+                # --- Buy & Hold Cumulative PnL (aggregated) ---
+                # Add a buy_hold_pnl series across the portfolio trades
+                cum_buy_hold = np.zeros(len(all_trades_combined))
+                # For each symbol, calculate buy & hold curve aligned on trade indices
+                for symbol in included_symbols:
+                    trades_df = all_trades[symbol]
+                    signals = stock_data[symbol]["signals"]
+                    # find first and last trade time in this symbol
+                    if trades_df.empty:
+                        continue
+                    first_time = trades_df['entry_time'].values[0]
+                    last_time = trades_df['exit_time'].values[-1]
+                    # get nearest available signal prices for these times
+                    start_idx = signals.index.get_loc(first_time, method='nearest') if first_time in signals.index else 0
+                    end_idx = signals.index.get_loc(last_time, method='nearest') if last_time in signals.index else -1
+                    start_price = signals.iloc[start_idx]['close']
+                    end_price = signals.iloc[end_idx]['close']
+                    qty = int(capital_per_stock // start_price)
+                    leftover_cash = capital_per_stock - qty * start_price
+                    buy_hold_pnl = (end_price - start_price) * qty + leftover_cash
+                    idxs = all_trades_combined.index[all_trades_combined['symbol'] == symbol]
+                    cum_buy_hold[idxs] = buy_hold_pnl
+                # Now accumulate buy & hold PnL to plot as a line
+                line_buy_hold = np.cumsum(cum_buy_hold)
                 fig_water, ax_water = plt.subplots(figsize=(12, 4))
                 ax_water.bar(
                     range(len(all_trades_combined)),
                     all_trades_combined["net_pnl"],
                     bottom=bottoms,
                     color=["green" if x >= 0 else "red" for x in all_trades_combined["net_pnl"]],
+                    label='Strategy Cumulative'
+                )
+                ax_water.plot(
+                    range(len(all_trades_combined)),
+                    line_buy_hold,
+                    color='blue',
+                    linewidth=2,
+                    label='Buy & Hold'
                 )
                 ax_water.set_xlabel("Trade Index")
                 ax_water.set_ylabel("Net PnL (₹)")
-                ax_water.set_title("Trade-by-Trade Net PnL Contribution (Portfolio)")
+                ax_water.set_title("Trade-by-Trade Net PnL Contribution (Portfolio) with Buy & Hold")
+                ax_water.legend()
                 st.pyplot(fig_water)
 
             # Allocation pie chart
@@ -168,7 +203,7 @@ with tabs[0]:
             st.subheader("Portfolio Leaderboard")
             st.dataframe(df_summary.sort_values("Net PnL", ascending=False))
 
-# ===== Per Symbol Analysis Tab =====
+# = Per Symbol Analysis Tab =
 with tabs[1]:
     if n_stocks == 0:
         st.warning("Upload data files to analyze individual stocks.")
@@ -182,7 +217,6 @@ with tabs[1]:
             starting_capital=capital_per_stock,
             risk_per_trade=risk_per_trade,
         )
-
         if trades_df.empty:
             st.info("No trade data available for selected symbol.")
         else:
@@ -191,7 +225,6 @@ with tabs[1]:
             c1.metric("Total Trades", len(trades_df))
             c2.metric("Win Rate (%)", f"{win_rate:.2f}")
             c3.metric("Net PnL (₹)", f"{trades_df['net_pnl'].sum():,.2f}")
-
             st.subheader(f"{symbol_select.upper()} Equity Curve")
             fig_eq, ax = plt.subplots(figsize=(10, 4))
             equity_curve.plot(ax=ax, color="green", linewidth=2)
@@ -199,7 +232,6 @@ with tabs[1]:
             ax.set_ylabel("Capital (₹)")
             ax.grid(True)
             st.pyplot(fig_eq)
-
             # Individual symbol drawdown
             st.subheader(f"{symbol_select.upper()} Drawdown")
             eq_cumret = equity_curve / equity_curve.iloc[0]
@@ -210,7 +242,6 @@ with tabs[1]:
             ax_dd.set_xlabel("Date")
             ax_dd.grid(True)
             st.pyplot(fig_dd)
-
             # Candlestick chart with trade overlay
             st.subheader(f"Candlestick Chart with Trades ({symbol_select.upper()})")
             signals_df = stock_data[symbol_select]['signals']
@@ -238,7 +269,6 @@ with tabs[1]:
                 ))
                 fig_candle.update_layout(title=f"{symbol_select.upper()} Price & Trades", xaxis_title="Date", yaxis_title="Price")
                 st.plotly_chart(fig_candle)
-
             # Waterfall chart
             st.subheader(f"Trade Waterfall Chart ({symbol_select.upper()})")
             cum = 0
@@ -258,7 +288,7 @@ with tabs[1]:
             ax_water.set_title(f"Trade-by-Trade Net PnL Contribution ({symbol_select.upper()})")
             st.pyplot(fig_water)
 
-# ===== All Equity Curves Tab =====
+# = All Equity Curves Tab =
 with tabs[2]:
     if n_stocks == 0:
         st.warning("Upload data files to compare equity curves.")
