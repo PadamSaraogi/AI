@@ -64,7 +64,6 @@ with tabs[0]:
             capital_per_stock = total_portfolio_capital // n_stocks
             all_trades = {}
             all_equity_curves = {}
-
             # Run backtest and tag trades with their symbol
             for symbol in included_symbols:
                 df_signals = stock_data[symbol]['signals']
@@ -73,7 +72,7 @@ with tabs[0]:
                     starting_capital=capital_per_stock,
                     risk_per_trade=risk_per_trade
                 )
-                trades_df['symbol'] = symbol  # <-- Tag each trade with symbol for later use
+                trades_df['symbol'] = symbol  # Tag trades for buy & hold logic
                 all_trades[symbol] = trades_df
                 all_equity_curves[symbol] = equity_curve
 
@@ -114,24 +113,21 @@ with tabs[0]:
                     bottoms.append(cum)
                     cum += pnl
                 # --- Buy & Hold Cumulative PnL (aggregated) ---
-                # Add a buy_hold_pnl series across the portfolio trades
                 cum_buy_hold = np.zeros(len(all_trades_combined))
-                # For each symbol, calculate buy & hold curve aligned on trade indices
+                # For each symbol, robust buy & hold logic
                 for symbol in included_symbols:
                     trades_df = all_trades[symbol]
-                    signals = stock_data[symbol]["signals"]
-                    # find first and last trade time in this symbol
+                    signals = stock_data[symbol]["signals"].sort_index()
                     if trades_df.empty:
                         continue
                     first_time = trades_df['entry_time'].values[0]
                     last_time = trades_df['exit_time'].values[-1]
-                    # get nearest available signal prices for these times
-                    # Ensure index is sorted
-                    signals = signals.sort_index()
-                    
-                    # Find the closest index for start_time and end_time using .get_indexer, which avoids errors
-                    start_idx = signals.index.get_indexer([pd.to_datetime(first_time)], method='nearest')[0]
-                    end_idx = signals.index.get_indexer([pd.to_datetime(last_time)], method='nearest')
+                    # Convert trade times to pandas.Timestamp for compatibility
+                    first_time_ts = pd.to_datetime(first_time)
+                    last_time_ts = pd.to_datetime(last_time)
+                    # Get nearest index positions
+                    start_idx = signals.index.get_indexer([first_time_ts], method='nearest')[0]
+                    end_idx = signals.index.get_indexer([last_time_ts], method='nearest')[0]
                     start_price = signals.iloc[start_idx]['close']
                     end_price = signals.iloc[end_idx]['close']
                     qty = int(capital_per_stock // start_price)
@@ -139,7 +135,7 @@ with tabs[0]:
                     buy_hold_pnl = (end_price - start_price) * qty + leftover_cash
                     idxs = all_trades_combined.index[all_trades_combined['symbol'] == symbol]
                     cum_buy_hold[idxs] = buy_hold_pnl
-                # Now accumulate buy & hold PnL to plot as a line
+                # Cumulative buy & hold for each trade index
                 line_buy_hold = np.cumsum(cum_buy_hold)
                 fig_water, ax_water = plt.subplots(figsize=(12, 4))
                 ax_water.bar(
