@@ -2,22 +2,24 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
-from backtest import run_backtest_simulation  # Make sure backtest.py is present and imported
+from backtest import run_backtest_simulation  # Ensure this is your backtest function
 
 st.set_page_config(layout="wide")
-st.title("📊 Multi-Stock Portfolio Backtest Dashboard")
+st.title("📊 Enhanced Multi-Stock Portfolio Backtest Dashboard")
 
-# === 1. Sidebar: Multi-file Uploads ===
+# --- Sidebar: Multi-file Uploads and Parameters ---
 st.sidebar.header("Upload Data Files")
 signal_files = st.sidebar.file_uploader(
     "Upload signal_enhanced CSVs (one per stock)", type="csv", accept_multiple_files=True)
 grid_files = st.sidebar.file_uploader(
     "Upload grid_search_results CSVs (one per stock)", type="csv", accept_multiple_files=True)
+
 total_portfolio_capital = st.sidebar.number_input("Total Portfolio Capital (₹)", min_value=10000, value=100000)
-risk_per_trade = st.sidebar.slider("Risk per Trade (%)", min_value=0.1, max_value=10.0, value=1.0, step=0.1) / 100
+risk_per_trade = st.sidebar.slider(
+    "Risk per Trade (%)", min_value=0.1, max_value=10.0, value=1.0, step=0.1) / 100
 
 def extract_symbol(fname):
-    # Adjust this logic to match your filename style. Example: 'signal_enhanced_XYZ.csv' -> 'xyz'
+    # Adjust to your filename pattern, e.g. "signal_enhanced_ABC.csv" -> "abc"
     return fname.split('_')[-1].split('.')[0].lower()
 
 stock_data = {}
@@ -35,14 +37,13 @@ if signal_files and grid_files:
 symbols_list = list(stock_data.keys())
 n_stocks = len(symbols_list)
 
-# === 2. Dashboard Tabs ===
 tabs = st.tabs([
     "Portfolio Overview",
     "Per Symbol Analysis",
     "All Equity Curves"
 ])
 
-# === 3. Portfolio Overview Tab ===
+# === Portfolio Overview Tab ===
 with tabs[0]:
     if n_stocks == 0:
         st.warning("Upload matching pairs of signal_enhanced and grid_search_results files for each stock.")
@@ -50,7 +51,7 @@ with tabs[0]:
         capital_per_stock = total_portfolio_capital // n_stocks
         st.write(f"Allocating ₹{capital_per_stock:,} to each of {n_stocks} stocks.")
 
-        # -- Backtest and gather results --
+        # Backtest each stock
         all_trades = {}
         all_equity_curves = {}
         for symbol in symbols_list:
@@ -63,13 +64,14 @@ with tabs[0]:
             all_trades[symbol] = trades_df
             all_equity_curves[symbol] = equity_curve
 
-        # -- Portfolio equity curve --
+        # Portfolio equity curve
         portfolio_equity = None
         for symbol, equity_curve in all_equity_curves.items():
             if portfolio_equity is None:
                 portfolio_equity = equity_curve
             else:
                 portfolio_equity = portfolio_equity.add(equity_curve, fill_value=0)
+
         st.subheader("🔥 Portfolio Equity Curve")
         fig, ax = plt.subplots(figsize=(10, 5))
         if portfolio_equity is not None:
@@ -80,7 +82,7 @@ with tabs[0]:
             ax.grid(True)
             st.pyplot(fig)
 
-        # -- Portfolio summary table --
+        # Portfolio summary table
         summary_data = []
         for symbol in symbols_list:
             trades_df = all_trades[symbol]
@@ -95,9 +97,25 @@ with tabs[0]:
                 "Win Rate (%)": f"{win_rate:.2f}"
             })
         st.subheader("Portfolio Symbol Summary")
-        st.dataframe(pd.DataFrame(summary_data))
+        df_summary = pd.DataFrame(summary_data)
+        st.dataframe(df_summary)
 
-# === 4. Per Symbol Analysis Tab ===
+        # Highlight top performing stock
+        top_symbol = df_summary.loc[df_summary['Net PnL'].idxmax(), 'Symbol']
+        st.markdown(f"🏆 **Top Performing Stock:** {top_symbol}")
+
+        # Portfolio allocation pie chart
+        portfolio_capitals = df_summary["Final Capital"].tolist()
+        fig2 = go.Figure(data=[go.Pie(
+            labels=df_summary["Symbol"],
+            values=portfolio_capitals,
+            textinfo='label+percent+value',
+            hole=0.2
+        )])
+        fig2.update_layout(title="Portfolio Allocation by Final Capital")
+        st.plotly_chart(fig2)
+
+# === Per Symbol Analysis ===
 with tabs[1]:
     if n_stocks == 0:
         st.warning("Upload matching pairs of signal_enhanced and grid_search_results files for each stock.")
@@ -107,23 +125,73 @@ with tabs[1]:
             symbols_list, format_func=lambda x: x.upper())
         trades_df = all_trades[symbol_select]
         equity_curve = all_equity_curves[symbol_select]
+
         st.subheader(f"Trades for {symbol_select.upper()}")
-        st.dataframe(trades_df)
-        st.markdown("Equity Curve (per stock)")
-        fig, ax = plt.subplots(figsize=(10, 4))
+
+        # Date filter for trades
+        min_date = trades_df['entry_time'].min()
+        max_date = trades_df['exit_time'].max()
+        date_range = st.date_input("Filter Trades by Date", [min_date, max_date])
+        filtered_trades = trades_df[
+            (trades_df['entry_time'] >= pd.to_datetime(date_range[0])) &
+            (trades_df['exit_time'] <= pd.to_datetime(date_range[1]))
+        ]
+        st.dataframe(filtered_trades)
+
+        # Download button for filtered trades
+        csv_trade = filtered_trades.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Download Filtered Trades CSV",
+            data=csv_trade,
+            file_name=f"trades_{symbol_select}.csv",
+            mime='text/csv'
+        )
+
+        # Advanced KPIs
+        st.markdown("### Key Metrics")
+        st.metric("Total Trades", len(trades_df))
+        st.metric("Win Rate (%)", f"{win_rate:.2f}" if not trades_df.empty else "N/A")
+        st.metric("Net PnL", f"₹{trades_df['net_pnl'].sum():,.2f}" if not trades_df.empty else "N/A")
+
+        # Win/Loss pie chart
+        win_counts = trades_df['net_pnl'].apply(lambda x: 'Win' if x > 0 else 'Loss').value_counts()
+        fig_pie = go.Figure(data=[go.Pie(
+            labels=win_counts.index,
+            values=win_counts.values,
+            textinfo='label+percent+value',
+            marker=dict(colors=['#4CAF50', '#F44336']),
+            hole=0.3,
+            pull=[0.1 if label=='Win' else 0 for label in win_counts.index]
+        )])
+        fig_pie.update_layout(title="Win/Loss Breakdown", showlegend=False)
+        st.plotly_chart(fig_pie)
+
+        # Best and Worst trades
+        if not trades_df.empty:
+            best_trade = trades_df.loc[trades_df['net_pnl'].idxmax()]
+            worst_trade = trades_df.loc[trades_df['net_pnl'].idxmin()]
+            col1, col2 = st.columns(2)
+            col1.success("Best Trade")
+            col1.json(best_trade.to_dict())
+            col2.error("Worst Trade")
+            col2.json(worst_trade.to_dict())
+
+        # Equity curve plot
+        st.markdown("### Equity Curve")
+        fig_eq, ax = plt.subplots(figsize=(10,4))
         equity_curve.plot(ax=ax, color="green", linewidth=2)
         ax.set_title(f"{symbol_select.upper()} Equity Curve")
         ax.set_xlabel("Date")
         ax.set_ylabel("Capital (₹)")
         ax.grid(True)
-        st.pyplot(fig)
+        st.pyplot(fig_eq)
 
-# === 5. All Equity Curves Tab ===
+# === All Equity Curves Tab ===
 with tabs[2]:
     if n_stocks == 0:
         st.warning("Upload matching pairs of signal_enhanced and grid_search_results files for each stock.")
     else:
-        st.subheader("All Stocks: Equity Curves")
+        st.subheader("All Stocks: Equity Curves Comparison")
         fig, ax = plt.subplots(figsize=(12, 6))
         for symbol, equity_curve in all_equity_curves.items():
             equity_curve.plot(ax=ax, label=symbol.upper())
