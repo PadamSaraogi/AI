@@ -239,22 +239,6 @@ with tabs[1]:
                 fig_candle.update_layout(title=f"{symbol_select.upper()} Price & Trades", xaxis_title="Date", yaxis_title="Price")
                 st.plotly_chart(fig_candle)
 
-            # Rolling metrics
-            st.subheader(f"Rolling Win Rate & Sharpe ({symbol_select.upper()})")
-            rolling_window = st.slider(
-                "Rolling Window Size (Days)", min_value=5, max_value=60, value=20, key=f"{symbol_select}_roll"
-            )
-            win_series = (trades_df["net_pnl"] > 0).astype(float).rolling(rolling_window).mean() * 100
-            daily_ret = equity_curve.pct_change().fillna(0)
-            rolling_sharpe = daily_ret.rolling(rolling_window).mean() / daily_ret.rolling(rolling_window).std() * np.sqrt(252)
-            fig_roll, ax_roll = plt.subplots(figsize=(12, 5))
-            win_series.plot(ax=ax_roll, label="Rolling Win Rate (%)", color="orange")
-            rolling_sharpe.plot(ax=ax_roll, label="Rolling Sharpe", color="purple")
-            ax_roll.set_ylabel("Rolling Metrics")
-            ax_roll.grid(True)
-            ax_roll.legend()
-            st.pyplot(fig_roll)
-
             # Waterfall chart
             st.subheader(f"Trade Waterfall Chart ({symbol_select.upper()})")
             cum = 0
