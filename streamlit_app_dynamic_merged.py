@@ -126,6 +126,16 @@ with tabs[1]:
         trades_df = all_trades[symbol_select]
         equity_curve = all_equity_curves[symbol_select]
 
+        # Equity curve plot
+        st.markdown("### Equity Curve")
+        fig_eq, ax = plt.subplots(figsize=(10,4))
+        equity_curve.plot(ax=ax, color="green", linewidth=2)
+        ax.set_title(f"{symbol_select.upper()} Equity Curve")
+        ax.set_xlabel("Date")
+        ax.set_ylabel("Capital (₹)")
+        ax.grid(True)
+        st.pyplot(fig_eq)
+
         st.subheader(f"Trades for {symbol_select.upper()}")
 
         # Date filter for trades
