@@ -274,24 +274,6 @@ with tabs[1]:
             ax_water.set_title(f"Trade-by-Trade Net PnL Contribution ({symbol_select.upper()})")
             st.pyplot(fig_water)
 
-            # Individual win/loss pie chart
-            st.subheader(f"Win/Loss Pie for {symbol_select.upper()}")
-            win_loss_counts = trades_df["net_pnl"].apply(lambda x: "Win" if x > 0 else "Loss").value_counts()
-            fig_pie = go.Figure(
-                data=[
-                    go.Pie(
-                        labels=win_loss_counts.index,
-                        values=win_loss_counts.values,
-                        hole=0.3,
-                        textinfo="label+percent+value",
-                        marker=dict(colors=["#4CAF50", "#F44336"]),
-                        pull=[0.1 if label == "Win" else 0 for label in win_loss_counts.index],
-                    )
-                ]
-            )
-            fig_pie.update_layout(title=f"Win/Loss Breakdown ({symbol_select.upper()})")
-            st.plotly_chart(fig_pie)
-
 # ===== All Equity Curves Tab =====
 with tabs[2]:
     if n_stocks == 0:
