@@ -136,6 +136,14 @@ with tabs[1]:
         ax.grid(True)
         st.pyplot(fig_eq)
 
+        # Advanced KPIs in one row with 3 columns
+        st.markdown("### Key Metrics")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Trades", len(trades_df))
+        col2.metric("Win Rate (%)", f"{win_rate:.2f}" if not trades_df.empty else "N/A")
+        col3.metric("Net PnL", f"₹{trades_df['net_pnl'].sum():,.2f}" if not trades_df.empty else "N/A")
+
+
         st.subheader(f"Trades for {symbol_select.upper()}")
 
         # Date filter for trades
