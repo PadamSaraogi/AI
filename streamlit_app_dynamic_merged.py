@@ -72,7 +72,7 @@ with tabs[0]:
                     starting_capital=capital_per_stock,
                     risk_per_trade=risk_per_trade
                 )
-                trades_df['symbol'] = symbol  # Tag trades for buy & hold logic
+                trades_df['symbol'] = symbol
                 all_trades[symbol] = trades_df
                 all_equity_curves[symbol] = equity_curve
 
@@ -112,9 +112,9 @@ with tabs[0]:
                 for pnl in all_trades_combined["net_pnl"]:
                     bottoms.append(cum)
                     cum += pnl
-                # --- Buy & Hold Cumulative PnL (aggregated) ---
-                cum_buy_hold = np.zeros(len(all_trades_combined))
-                # For each symbol, robust buy & hold logic
+
+                # ==== Buy & Hold Calculation (flat line) ====
+                portfolio_buy_hold_pnl = 0
                 for symbol in included_symbols:
                     trades_df = all_trades[symbol]
                     signals = stock_data[symbol]["signals"].sort_index()
@@ -122,21 +122,18 @@ with tabs[0]:
                         continue
                     first_time = trades_df['entry_time'].values[0]
                     last_time = trades_df['exit_time'].values[-1]
-                    # Convert trade times to pandas.Timestamp for compatibility
+                    # Use robust "nearest" match for index
                     first_time_ts = pd.to_datetime(first_time)
                     last_time_ts = pd.to_datetime(last_time)
-                    # Get nearest index positions
                     start_idx = signals.index.get_indexer([first_time_ts], method='nearest')[0]
-                    end_idx = signals.index.get_indexer([last_time_ts], method='nearest')[0]
+                    end_idx = signals.index.get_indexer([last_time_ts], method='nearest')
                     start_price = signals.iloc[start_idx]['close']
                     end_price = signals.iloc[end_idx]['close']
                     qty = int(capital_per_stock // start_price)
                     leftover_cash = capital_per_stock - qty * start_price
                     buy_hold_pnl = (end_price - start_price) * qty + leftover_cash
-                    idxs = all_trades_combined.index[all_trades_combined['symbol'] == symbol]
-                    cum_buy_hold[idxs] = buy_hold_pnl
-                # Cumulative buy & hold for each trade index
-                line_buy_hold = np.cumsum(cum_buy_hold)
+                    portfolio_buy_hold_pnl += buy_hold_pnl
+
                 fig_water, ax_water = plt.subplots(figsize=(12, 4))
                 ax_water.bar(
                     range(len(all_trades_combined)),
@@ -145,13 +142,8 @@ with tabs[0]:
                     color=["green" if x >= 0 else "red" for x in all_trades_combined["net_pnl"]],
                     label='Strategy Cumulative'
                 )
-                ax_water.plot(
-                    range(len(all_trades_combined)),
-                    line_buy_hold,
-                    color='blue',
-                    linewidth=2,
-                    label='Buy & Hold'
-                )
+                # Plot buy & hold as a horizontal line
+                ax_water.axhline(y=portfolio_buy_hold_pnl, color='blue', linewidth=2, label='Buy & Hold')
                 ax_water.set_xlabel("Trade Index")
                 ax_water.set_ylabel("Net PnL (₹)")
                 ax_water.set_title("Trade-by-Trade Net PnL Contribution (Portfolio) with Buy & Hold")
