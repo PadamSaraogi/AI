@@ -126,8 +126,12 @@ with tabs[0]:
                     first_time = trades_df['entry_time'].values[0]
                     last_time = trades_df['exit_time'].values[-1]
                     # get nearest available signal prices for these times
-                    start_idx = signals.index.get_loc(first_time, method='nearest') if first_time in signals.index else 0
-                    end_idx = signals.index.get_loc(last_time, method='nearest') if last_time in signals.index else -1
+                    # Ensure index is sorted
+                    signals = signals.sort_index()
+                    
+                    # Find the closest index for start_time and end_time using .get_indexer, which avoids errors
+                    start_idx = signals.index.get_indexer([pd.to_datetime(first_time)], method='nearest')[0]
+                    end_idx = signals.index.get_indexer([pd.to_datetime(last_time)], method='nearest')
                     start_price = signals.iloc[start_idx]['close']
                     end_price = signals.iloc[end_idx]['close']
                     qty = int(capital_per_stock // start_price)
