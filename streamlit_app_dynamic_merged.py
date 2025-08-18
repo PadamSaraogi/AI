@@ -3,35 +3,29 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
-from backtest import run_backtest_simulation  # Make sure this function is accessible
+from backtest import run_backtest_simulation  # Must be in your project
 
 st.set_page_config(layout="wide")
 st.markdown(
     """
     <div style='display: flex; align-items: center;'>
-        <img src='https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/React-icon.svg/512px-React-icon.svg.png' width='60'>
-        <h1 style='margin-left: 18px;'>Multi-Stock Portfolio Dashboard with Advanced Charts</h1>
+      <img src='https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/React-icon.svg/512px-React-icon.svg.png' width='60'>
+      <h1 style='margin-left: 18px;'>Multi-Stock Trading Dashboard</h1>
     </div>
-    """,
-    unsafe_allow_html=True,
+    """, unsafe_allow_html=True
 )
 
-# ========== Sidebar: Uploads & Parameters ==========
+# Sidebar: Data Upload and Parameters
 st.sidebar.header("Upload Data Files")
 signal_files = st.sidebar.file_uploader(
-    "Upload signal_enhanced CSVs (one per stock)", type="csv", accept_multiple_files=True
-)
+    "Upload signal_enhanced CSVs (one per stock)", type="csv", accept_multiple_files=True)
 grid_files = st.sidebar.file_uploader(
-    "Upload grid_search_results CSVs (one per stock)", type="csv", accept_multiple_files=True
-)
+    "Upload grid_search_results CSVs (one per stock)", type="csv", accept_multiple_files=True)
 total_portfolio_capital = st.sidebar.number_input("Total Portfolio Capital (₹)", min_value=10000, value=100000)
 risk_per_trade = st.sidebar.slider("Risk per Trade (%)", min_value=0.1, max_value=10.0, value=1.0, step=0.1) / 100
 
-
 def extract_symbol(fname):
-    # Adjust to your filename pattern; example: 'signal_enhanced_ABC.csv' -> 'abc'
     return fname.split('_')[-1].split('.')[0].lower()
-
 
 stock_data = {}
 if signal_files and grid_files:
@@ -51,23 +45,14 @@ n_stocks = len(symbols_list)
 tabs = st.tabs([
     "Portfolio Overview",
     "Per Symbol Analysis",
-    "All Equity Curves",
-    "Drawdown",
-    "Rolling Metrics",
-    "Trade Scatter & Histogram",
-    "Waterfall Chart",
-    "Correlation Heatmap",
-    "Trade Timeline",
-    "Allocation",
+    "All Equity Curves"
 ])
 
-
-# ========== Portfolio Overview ==========
+# ===== Portfolio Overview Tab =====
 with tabs[0]:
     if n_stocks == 0:
-        st.warning("Upload matching pairs for each stock (signals + grid search results).")
+        st.warning("Upload matching pairs for each stock.")
     else:
-        # Dynamic portfolio selection
         included_symbols = st.multiselect(
             "Select stocks included in portfolio:",
             options=symbols_list,
@@ -78,8 +63,6 @@ with tabs[0]:
             st.error("Select at least one stock!")
         else:
             capital_per_stock = total_portfolio_capital // n_stocks
-            st.write(f"Allocating ₹{capital_per_stock:,} to each of {n_stocks} stocks.")
-
             all_trades = {}
             all_equity_curves = {}
             for symbol in included_symbols:
@@ -87,7 +70,7 @@ with tabs[0]:
                 trades_df, equity_curve = run_backtest_simulation(
                     df_signals,
                     starting_capital=capital_per_stock,
-                    risk_per_trade=risk_per_trade,
+                    risk_per_trade=risk_per_trade
                 )
                 all_trades[symbol] = trades_df
                 all_equity_curves[symbol] = equity_curve
@@ -96,24 +79,19 @@ with tabs[0]:
             portfolio_equity = None
             for eq in all_equity_curves.values():
                 portfolio_equity = eq if portfolio_equity is None else portfolio_equity.add(eq, fill_value=0)
-
             total_trades = sum([len(t) for t in all_trades.values()])
             total_net_pnl = sum([t['net_pnl'].sum() for t in all_trades.values()])
 
-            # Portfolio drawdown & risk metrics
+            # Portfolio-wide metrics
             if portfolio_equity is not None:
                 daily_returns = portfolio_equity.pct_change().fillna(0)
                 cum_returns = (1 + daily_returns).cumprod()
                 drawdowns = cum_returns / cum_returns.cummax() - 1
                 max_drawdown = drawdowns.min()
-                sharpe = np.nan
-                sortino = np.nan
                 volatility = daily_returns.std()
-                if volatility != 0:
-                    sharpe = daily_returns.mean() / volatility * np.sqrt(252)
-                    downside_std = daily_returns[daily_returns < 0].std()
-                    if downside_std != 0:
-                        sortino = daily_returns.mean() / downside_std * np.sqrt(252)
+                sharpe = daily_returns.mean() / volatility * np.sqrt(252) if volatility != 0 else np.nan
+                downside_std = daily_returns[daily_returns < 0].std()
+                sortino = daily_returns.mean() / downside_std * np.sqrt(252) if downside_std != 0 else np.nan
             else:
                 max_drawdown = sharpe = sortino = volatility = np.nan
 
@@ -125,9 +103,9 @@ with tabs[0]:
             c4.metric("Sharpe Ratio", f"{sharpe:.2f}" if not np.isnan(sharpe) else "N/A")
             c5.metric("Sortino Ratio", f"{sortino:.2f}" if not np.isnan(sortino) else "N/A")
 
-            # Equity curve chart
+            # Portfolio equity curve
             st.subheader("Portfolio Equity Curve")
-            fig, ax = plt.subplots(figsize=(10, 5))
+            fig, ax = plt.subplots(figsize=(10, 4))
             portfolio_equity.plot(ax=ax, color='blue', linewidth=2)
             ax.set_xlabel("Date")
             ax.set_ylabel("Portfolio Value (₹)")
@@ -148,7 +126,16 @@ with tabs[0]:
             fig_alloc.update_layout(title="Portfolio Allocation by Final Capital")
             st.plotly_chart(fig_alloc)
 
-            # Portfolio summary data table with download
+            # Portfolio drawdown chart
+            st.subheader("Portfolio Drawdown")
+            fig_dd, ax_dd = plt.subplots(figsize=(10, 4))
+            drawdowns.plot(ax=ax_dd, color="red")
+            ax_dd.set_ylabel("Drawdown")
+            ax_dd.set_xlabel("Date")
+            ax_dd.grid(True)
+            st.pyplot(fig_dd)
+
+            # Portfolio leaderboard
             summary_data = []
             for symbol in included_symbols:
                 trades_df = all_trades[symbol]
@@ -163,22 +150,54 @@ with tabs[0]:
                         "Start Capital": capital_per_stock,
                         "Final Capital": round(final_cap, 2),
                         "Net PnL": round(net_pnl, 2),
-                        "Win Rate (%)": f"{win_rate:.2f}",
+                        "Win Rate (%)": f"{win_rate:.2f}"
                     }
                 )
             df_summary = pd.DataFrame(summary_data)
-            st.subheader("Portfolio Symbol Summary")
-            st.dataframe(df_summary)
-            csv_summary = df_summary.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "Download Portfolio Summary CSV",
-                csv_summary,
-                "portfolio_summary.csv",
-                "text/csv",
-            )
+            st.subheader("Portfolio Leaderboard")
+            st.dataframe(df_summary.sort_values("Net PnL", ascending=False))
 
+            # Portfolio-wide waterfall chart
+            st.subheader("Portfolio PnL Waterfall")
+            all_trades_combined = pd.concat(all_trades.values()).sort_values("exit_time")
+            if not all_trades_combined.empty:
+                cum = 0
+                bottoms = []
+                for pnl in all_trades_combined["net_pnl"]:
+                    bottoms.append(cum)
+                    cum += pnl
+                fig_water, ax_water = plt.subplots(figsize=(12, 4))
+                ax_water.bar(
+                    range(len(all_trades_combined)),
+                    all_trades_combined["net_pnl"],
+                    bottom=bottoms,
+                    color=["green" if x >= 0 else "red" for x in all_trades_combined["net_pnl"]],
+                )
+                ax_water.set_xlabel("Trade Index")
+                ax_water.set_ylabel("Net PnL (₹)")
+                ax_water.set_title("Trade-by-Trade Net PnL Contribution (Portfolio)")
+                st.pyplot(fig_water)
 
-# ========== Per Symbol Analysis ==========
+            # Correlation heatmap
+            if len(all_equity_curves) > 1:
+                st.subheader("Portfolio Asset Correlation Heatmap")
+                returns_df = pd.DataFrame()
+                for symbol, eq_curve in all_equity_curves.items():
+                    returns_df[symbol.upper()] = eq_curve.pct_change()
+                corr = returns_df.corr()
+                fig_corr = go.Figure(
+                    data=go.Heatmap(
+                        z=corr.values,
+                        x=corr.columns,
+                        y=corr.index,
+                        colorscale="Blues",
+                        colorbar=dict(title="Correlation"),
+                    )
+                )
+                fig_corr.update_layout(title="Correlation Matrix of Daily Returns")
+                st.plotly_chart(fig_corr)
+
+# ===== Per Symbol Analysis Tab =====
 with tabs[1]:
     if n_stocks == 0:
         st.warning("Upload data files to analyze individual stocks.")
@@ -186,9 +205,14 @@ with tabs[1]:
         symbol_select = st.selectbox(
             "Select Symbol", symbols_list, format_func=lambda s: s.upper()
         )
-        trades_df = all_trades.get(symbol_select)
-        equity_curve = all_equity_curves.get(symbol_select)
-        if trades_df is None or trades_df.empty:
+        capital_per_stock = total_portfolio_capital // n_stocks
+        trades_df, equity_curve = run_backtest_simulation(
+            stock_data[symbol_select]['signals'],
+            starting_capital=capital_per_stock,
+            risk_per_trade=risk_per_trade,
+        )
+
+        if trades_df.empty:
             st.info("No trade data available for selected symbol.")
         else:
             win_rate = (trades_df["net_pnl"] > 0).mean() * 100
@@ -197,7 +221,6 @@ with tabs[1]:
             c2.metric("Win Rate (%)", f"{win_rate:.2f}")
             c3.metric("Net PnL (₹)", f"{trades_df['net_pnl'].sum():,.2f}")
 
-            # Equity curve
             st.subheader(f"{symbol_select.upper()} Equity Curve")
             fig_eq, ax = plt.subplots(figsize=(10, 4))
             equity_curve.plot(ax=ax, color="green", linewidth=2)
@@ -206,142 +229,63 @@ with tabs[1]:
             ax.grid(True)
             st.pyplot(fig_eq)
 
-            # Best/Worst trades
-            best_trade = trades_df.loc[trades_df["net_pnl"].idxmax()]
-            worst_trade = trades_df.loc[trades_df["net_pnl"].idxmin()]
-            b_col, w_col = st.columns(2)
-            b_col.success("Best Trade")
-            b_col.json(best_trade.to_dict())
-            w_col.error("Worst Trade")
-            w_col.json(worst_trade.to_dict())
+            # Individual symbol drawdown
+            st.subheader(f"{symbol_select.upper()} Drawdown")
+            eq_cumret = equity_curve / equity_curve.iloc[0]
+            drawdowns = eq_cumret / eq_cumret.cummax() - 1
+            fig_dd, ax_dd = plt.subplots(figsize=(10, 4))
+            drawdowns.plot(ax=ax_dd, color="red")
+            ax_dd.set_ylabel("Drawdown")
+            ax_dd.set_xlabel("Date")
+            ax_dd.grid(True)
+            st.pyplot(fig_dd)
 
-            # Filter trades by date
-            min_date = trades_df["entry_time"].min()
-            max_date = trades_df["exit_time"].max()
-            date_range = st.date_input("Filter Trades by Date", [min_date, max_date])
-            filtered_trades = trades_df[
-                (trades_df["entry_time"] >= pd.to_datetime(date_range[0]))
-                & (trades_df["exit_time"] <= pd.to_datetime(date_range[1]))
-            ]
-            st.dataframe(filtered_trades)
+            # Candlestick chart with trade overlay
+            st.subheader(f"Candlestick Chart with Trades ({symbol_select.upper()})")
+            signals_df = stock_data[symbol_select]['signals']
+            if {'open','high','low','close'}.issubset(signals_df.columns):
+                fig_candle = go.Figure(data=[go.Candlestick(
+                    x=signals_df.index,
+                    open=signals_df['open'],
+                    high=signals_df['high'],
+                    low=signals_df['low'],
+                    close=signals_df['close']
+                )])
+                fig_candle.add_trace(go.Scatter(
+                    x=trades_df['entry_time'],
+                    y=trades_df['entry_price'],
+                    mode='markers',
+                    marker=dict(symbol='triangle-up', color='green', size=9),
+                    name='Buy Entry'
+                ))
+                fig_candle.add_trace(go.Scatter(
+                    x=trades_df['exit_time'],
+                    y=trades_df['final_exit_price'],
+                    mode='markers',
+                    marker=dict(symbol='triangle-down', color='red', size=9),
+                    name='Exit'
+                ))
+                fig_candle.update_layout(title=f"{symbol_select.upper()} Price & Trades", xaxis_title="Date", yaxis_title="Price")
+                st.plotly_chart(fig_candle)
 
-            csv_filtered = filtered_trades.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "Download Filtered Trades CSV",
-                csv_filtered,
-                f"trades_{symbol_select}.csv",
-                "text/csv",
+            # Rolling metrics
+            st.subheader(f"Rolling Win Rate & Sharpe ({symbol_select.upper()})")
+            rolling_window = st.slider(
+                "Rolling Window Size (Days)", min_value=5, max_value=60, value=20, key=f"{symbol_select}_roll"
             )
+            win_series = (trades_df["net_pnl"] > 0).astype(float).rolling(rolling_window).mean() * 100
+            daily_ret = equity_curve.pct_change().fillna(0)
+            rolling_sharpe = daily_ret.rolling(rolling_window).mean() / daily_ret.rolling(rolling_window).std() * np.sqrt(252)
+            fig_roll, ax_roll = plt.subplots(figsize=(12, 5))
+            win_series.plot(ax=ax_roll, label="Rolling Win Rate (%)", color="orange")
+            rolling_sharpe.plot(ax=ax_roll, label="Rolling Sharpe", color="purple")
+            ax_roll.set_ylabel("Rolling Metrics")
+            ax_roll.grid(True)
+            ax_roll.legend()
+            st.pyplot(fig_roll)
 
-            # Win/Loss pie chart
-            win_loss_counts = filtered_trades["net_pnl"].apply(lambda x: "Win" if x > 0 else "Loss").value_counts()
-            fig_pie = go.Figure(
-                data=[
-                    go.Pie(
-                        labels=win_loss_counts.index,
-                        values=win_loss_counts.values,
-                        hole=0.3,
-                        textinfo="label+percent+value",
-                        marker=dict(colors=["#4CAF50", "#F44336"]),
-                        pull=[0.1 if label == "Win" else 0 for label in win_loss_counts.index],
-                    )
-                ]
-            )
-            fig_pie.update_layout(title=f"Win/Loss Breakdown for {symbol_select.upper()}")
-            st.plotly_chart(fig_pie)
-
-            # Signal timeline scatter
-            signals_df = stock_data[symbol_select]["signals"]
-            if "signal" in signals_df:
-                st.subheader("Signal Timeline (Buy=1 / Sell=-1 / Neutral=0)")
-                color_map = {1: "green", 0: "gray", -1: "red"}
-                signal_colors = signals_df["signal"].map(color_map)
-                fig_sig, ax_sig = plt.subplots(figsize=(10, 2))
-                ax_sig.scatter(signals_df.index, signals_df["signal"], c=signal_colors)
-                ax_sig.set_yticks([-1, 0, 1])
-                ax_sig.set_yticklabels(["Sell", "Neutral", "Buy"])
-                ax_sig.set_title(f"Signal Timeline: {symbol_select.upper()}")
-                st.pyplot(fig_sig)
-
-
-# ========== All Equity Curves ==========
-with tabs[2]:
-    if n_stocks == 0:
-        st.warning("Upload data files to analyze equity curves.")
-    else:
-        st.subheader("All Stocks Equity Curves")
-        fig, ax = plt.subplots(figsize=(12, 6))
-        for symbol, equity_curve in all_equity_curves.items():
-            equity_curve.plot(ax=ax, label=symbol.upper())
-        ax.set_xlabel("Date")
-        ax.set_ylabel("Capital (₹)")
-        ax.set_title("Per-Stock Equity Curves")
-        ax.legend()
-        ax.grid(True)
-        st.pyplot(fig)
-
-# ========== Drawdown Chart ==========
-with tabs[3]:
-    if portfolio_equity is None:
-        st.warning("Run portfolio backtest to see drawdown chart.")
-    else:
-        st.subheader("Portfolio Drawdown")
-        cumulative_returns = portfolio_equity / portfolio_equity.iloc[0]
-        drawdowns = cumulative_returns / cumulative_returns.cummax() - 1
-        fig, ax = plt.subplots(figsize=(10, 4))
-        drawdowns.plot(ax=ax, color="red")
-        ax.set_ylabel("Drawdown")
-        ax.set_xlabel("Date")
-        ax.grid(True)
-        st.pyplot(fig)
-
-# ========== Rolling Metrics ==========
-with tabs[4]:
-    if portfolio_equity is None:
-        st.warning("Run portfolio backtest to see rolling metrics.")
-    else:
-        st.subheader("Rolling Performance Metrics")
-        daily_ret = portfolio_equity.pct_change().fillna(0)
-
-        rolling_window = st.slider("Rolling Window Size (Days)", min_value=5, max_value=60, value=20)
-        rolling_sharpe = daily_ret.rolling(window=rolling_window).mean() / daily_ret.rolling(window=rolling_window).std() * np.sqrt(252)
-        rolling_winrate = pd.Series(np.nan, index=daily_ret.index)
-        # Calculate rolling win rate with a simple method
-        all_trades_df = pd.concat(all_trades.values())
-        # This is a simplified proxy; for exact rolling win rate, more complex logic could be implemented
-        rolling_winrate.iloc[-len(rolling_sharpe):] = (
-            (rolling_sharpe > 0).rolling(window=rolling_window).mean() * 100
-        )
-
-        fig, ax = plt.subplots(figsize=(12, 5))
-        rolling_sharpe.plot(ax=ax, label="Rolling Sharpe")
-        ax.set_ylabel("Rolling Sharpe Ratio")
-        ax.grid(True)
-        ax.legend()
-        st.pyplot(fig)
-
-        fig2, ax2 = plt.subplots(figsize=(12, 5))
-        rolling_winrate.plot(ax=ax2, label="Rolling Win Rate (%)", color="orange")
-        ax2.set_ylabel("Rolling Win Rate (%)")
-        ax2.grid(True)
-        ax2.legend()
-        st.pyplot(fig2)
-
-# ========== Trade Scatter & Histogram ==========
-with tabs[5]:
-    if n_stocks == 0:
-        st.warning("Upload data to view trade scatter and histogram.")
-    else:
-        st.subheader("Trade PnL vs Duration Scatter & PnL Histogram")
-        symbol_select = st.selectbox(
-            "Select Stock for Scatter Plot",
-            options=symbols_list,
-            format_func=lambda s: s.upper(),
-        )
-        trades_df = all_trades.get(symbol_select)
-        if trades_df is None or trades_df.empty:
-            st.info("No trade data available.")
-        else:
+            # Trade scatter, histogram
+            st.subheader(f"Trade Scatter: PnL vs Duration ({symbol_select.upper()})")
             fig_scatter = go.Figure()
             fig_scatter.add_trace(
                 go.Scatter(
@@ -365,77 +309,38 @@ with tabs[5]:
             )
             st.plotly_chart(fig_scatter)
 
-            # PnL histogram
+            st.subheader(f"Trade PnL Histogram ({symbol_select.upper()})")
             fig_hist, ax = plt.subplots(figsize=(10, 4))
             ax.hist(trades_df["net_pnl"], bins=30, color="skyblue", edgecolor="black")
-            ax.set_title(f"{symbol_select.upper()} Trade PnL Distribution")
             ax.set_xlabel("Net PnL")
             ax.set_ylabel("Frequency")
+            ax.set_title(f"Trade PnL Distribution ({symbol_select.upper()})")
             st.pyplot(fig_hist)
 
-# ========== Waterfall Chart ==========
-with tabs[6]:
-    st.header("Portfolio Trade-by-Trade PnL Waterfall")
-    if n_stocks == 0:
-        st.warning("Upload data to view waterfall chart.")
-    else:
-        all_trades_combined = pd.concat(all_trades.values()).sort_values("exit_time")
-        if all_trades_combined.empty:
-            st.info("No trades to display.")
-        else:
+            # Waterfall chart
+            st.subheader(f"Trade Waterfall Chart ({symbol_select.upper()})")
             cum = 0
             bottoms = []
-            for pnl in all_trades_combined["net_pnl"]:
+            for pnl in trades_df["net_pnl"]:
                 bottoms.append(cum)
                 cum += pnl
-            fig_water, ax = plt.subplots(figsize=(12, 5))
-            ax.bar(
-                range(len(all_trades_combined)),
-                all_trades_combined["net_pnl"],
+            fig_water, ax_water = plt.subplots(figsize=(12, 4))
+            ax_water.bar(
+                range(len(trades_df)),
+                trades_df["net_pnl"],
                 bottom=bottoms,
-                color=["green" if x >= 0 else "red" for x in all_trades_combined["net_pnl"]],
+                color=["green" if x >= 0 else "red" for x in trades_df["net_pnl"]],
             )
-            ax.set_xlabel("Trade Index")
-            ax.set_ylabel("Net PnL (₹)")
-            ax.set_title("Trade-by-Trade Net PnL Contribution")
+            ax_water.set_xlabel("Trade Index")
+            ax_water.set_ylabel("Net PnL (₹)")
+            ax_water.set_title(f"Trade-by-Trade Net PnL Contribution ({symbol_select.upper()})")
             st.pyplot(fig_water)
 
-# ========== Correlation Heatmap ==========
-with tabs[7]:
-    st.header("Portfolio Asset Correlation Heatmap")
-    if n_stocks < 2:
-        st.info("Upload at least two stocks to see correlation heatmap.")
-    else:
-        # Calculate daily returns for each stock equity curve
-        returns_df = pd.DataFrame()
-        for symbol, eq_curve in all_equity_curves.items():
-            returns_df[symbol.upper()] = eq_curve.pct_change()
-        corr = returns_df.corr()
-        fig_corr = go.Figure(
-            data=go.Heatmap(
-                z=corr.values,
-                x=corr.columns,
-                y=corr.index,
-                colorscale="Blues",
-                colorbar=dict(title="Correlation"),
-            )
-        )
-        fig_corr.update_layout(title="Correlation Matrix of Daily Returns")
-        st.plotly_chart(fig_corr)
-
-# ========== Trade Timeline ==========
-with tabs[8]:
-    st.header("Trade Timeline (Entry to Exit)")
-    if n_stocks == 0:
-        st.warning("Upload data to view trade timeline.")
-    else:
-        all_trades_combined = pd.concat(all_trades.values()).sort_values("entry_time")
-        if all_trades_combined.empty:
-            st.info("No trades to show.")
-        else:
-            fig_timeline, ax = plt.subplots(figsize=(12, 6))
+            # Timeline chart (entry to exit)
+            st.subheader(f"Trade Timeline ({symbol_select.upper()})")
+            fig_timeline, ax = plt.subplots(figsize=(12, 5))
             colors = {"Buy": "green", "Short Sell": "red"}
-            for i, row in all_trades_combined.iterrows():
+            for i, row in trades_df.iterrows():
                 ax.plot(
                     [row["entry_time"], row["exit_time"]],
                     [i, i],
@@ -444,24 +349,45 @@ with tabs[8]:
                 )
             ax.set_xlabel("Date")
             ax.set_ylabel("Trade Index")
-            ax.set_title("Trade Duration Timeline")
+            ax.set_title(f"Trade Duration Timeline ({symbol_select.upper()})")
             st.pyplot(fig_timeline)
 
-# ========== Allocation Pie Chart ==========
-with tabs[9]:
-    st.header("Portfolio Allocation by Final Capital")
+            # Individual win/loss pie chart
+            st.subheader(f"Win/Loss Pie for {symbol_select.upper()}")
+            win_loss_counts = trades_df["net_pnl"].apply(lambda x: "Win" if x > 0 else "Loss").value_counts()
+            fig_pie = go.Figure(
+                data=[
+                    go.Pie(
+                        labels=win_loss_counts.index,
+                        values=win_loss_counts.values,
+                        hole=0.3,
+                        textinfo="label+percent+value",
+                        marker=dict(colors=["#4CAF50", "#F44336"]),
+                        pull=[0.1 if label == "Win" else 0 for label in win_loss_counts.index],
+                    )
+                ]
+            )
+            fig_pie.update_layout(title=f"Win/Loss Breakdown ({symbol_select.upper()})")
+            st.plotly_chart(fig_pie)
+
+# ===== All Equity Curves Tab =====
+with tabs[2]:
     if n_stocks == 0:
-        st.warning("Upload data to view allocation.")
+        st.warning("Upload data files to compare equity curves.")
     else:
-        final_caps = [
-            all_trades[s]["capital_after_trade"].iloc[-1] if not all_trades[s].empty else capital_per_stock
-            for s in symbols_list
-        ]
-        fig_alloc = go.Figure(data=[go.Pie(
-            labels=[s.upper() for s in symbols_list],
-            values=final_caps,
-            hole=0.3,
-            textinfo="label+percent+value"
-        )])
-        fig_alloc.update_layout(title="Portfolio Capital Allocation")
-        st.plotly_chart(fig_alloc)
+        st.subheader("All Stocks Equity Curves")
+        fig, ax = plt.subplots(figsize=(12, 6))
+        for symbol in symbols_list:
+            capital_per_stock = total_portfolio_capital // n_stocks
+            _, eq_curve = run_backtest_simulation(
+                stock_data[symbol]['signals'],
+                starting_capital=capital_per_stock,
+                risk_per_trade=risk_per_trade,
+            )
+            eq_curve.plot(ax=ax, label=symbol.upper())
+        ax.set_xlabel("Date")
+        ax.set_ylabel("Capital (₹)")
+        ax.set_title("Per-Stock Equity Curves")
+        ax.legend()
+        ax.grid(True)
+        st.pyplot(fig)
