@@ -18,15 +18,14 @@ def run_backtest_simulation(
     trail_mult=2.0, 
     time_limit=16, 
     adx_target_mult=2.5,
-    starting_capital=100_000,  # New: user-controllable via Streamlit
-    risk_per_trade=0.01        # New: user-controllable via Streamlit
+    starting_capital=100_000,
+    risk_per_trade=0.01
 ):
     trades = []
     in_trade = False
-    COOLDOWN_BARS = 0
     STOP_MULT = 1.0
     EXIT_TIME = pd.to_datetime("15:25:00").time()
-    REENTER_TIME = pd.to_datetime("09:25:00").time()
+    REENTER_TIME = pd.to_datetime("09:00:00").time()
     last_trade_exit = None
     entry_price = None
     entry_sig = None
@@ -34,8 +33,11 @@ def run_backtest_simulation(
     tp_full = None
     trail_price = None
     entry_idx = None
-    position_size = None  # qty for the trade
+    position_size = None
     capital = starting_capital
+
+    # For per-trade equity curve
+    equity_curve = []
 
     for i in range(1, len(df)):
         sig = df['signal'].iat[i]
@@ -45,12 +47,13 @@ def run_backtest_simulation(
         trade_time = df.index[i].time()
         trade_date = df.index[i].date()
 
-        # Prevent trades before 9:20am (add this line if needed)
+        # Prevent trades before 9:20am
         ALLOW_TRADING_AFTER = pd.to_datetime("09:20:00").time()
         if trade_time <= ALLOW_TRADING_AFTER:
+            equity_curve.append(capital)
             continue
 
-        # Optional: Restrict new trades to after previous day's exit.
+        # Optional: re-entry filter logic can be included here
         if last_trade_exit and trade_time >= REENTER_TIME and trade_date > last_trade_exit.date():
             if not in_trade and sig != 0:
                 entry_price = price
@@ -58,15 +61,14 @@ def run_backtest_simulation(
                 stop_price = entry_price - STOP_MULT * atr * entry_sig
                 tp_full = entry_price + adx_target_mult * atr * entry_sig
                 trail_price = entry_price
-
                 # ATR-based position sizing
                 trade_risk = abs(entry_price - stop_price)
                 risk_amount = capital * risk_per_trade
                 qty = max(1, int(risk_amount // trade_risk)) if trade_risk > 0 else 1
-
                 position_size = qty
                 in_trade = True
                 entry_idx = i
+                equity_curve.append(capital)
                 continue
 
         if not in_trade and sig != 0:
@@ -75,22 +77,19 @@ def run_backtest_simulation(
             stop_price = entry_price - STOP_MULT * atr * entry_sig
             tp_full = entry_price + adx_target_mult * atr * entry_sig
             trail_price = entry_price
-
-            # ATR-based position sizing
             trade_risk = abs(entry_price - stop_price)
             risk_amount = capital * risk_per_trade
             qty = max(1, int(risk_amount // trade_risk)) if trade_risk > 0 else 1
-
             position_size = qty
             in_trade = True
             entry_idx = i
+            equity_curve.append(capital)
             continue
 
         if in_trade:
             duration = i - entry_idx
             price_now = price
             atr_now = atr
-
             # Trailing stop management
             if entry_sig > 0:
                 trail_price = max(trail_price, price_now)
@@ -115,12 +114,9 @@ def run_backtest_simulation(
             if hit_exit:
                 final_exit_price = price_now
                 pnl_full = ((final_exit_price - entry_price) if entry_sig == 1 else (entry_price - final_exit_price)) * position_size
-
                 fees = calculate_intraday_fees(entry_price, final_exit_price, position_size)
                 net_pnl = pnl_full - fees
-
                 capital += net_pnl
-
                 trades.append({
                     'entry_time': df.index[entry_idx],
                     'exit_time': df.index[i],
@@ -135,17 +131,22 @@ def run_backtest_simulation(
                     'position_size': position_size,
                     'capital_after_trade': capital
                 })
-
                 in_trade = False
                 last_trade_exit = df.index[i]
-                position_size = None  # reset position
+                position_size = None
 
-    return trades
+        equity_curve.append(capital)
 
-# Test block/example (optional):
+    # Return trades DataFrame and equity curve (portfolio code will need these)
+    trades_df = pd.DataFrame(trades)
+    equity_curve = pd.Series(equity_curve, index=df.index[1:len(equity_curve)+1])
+
+    return trades_df, equity_curve
+
+# Example test block—remove/comment for production use
 if __name__ == "__main__":
     # Example usage:
     # df = pd.read_csv("5m_signals_enhanced_XYZ.csv", parse_dates=['datetime'])
     # df.set_index('datetime', inplace=True)
-    # trades = run_backtest_simulation(df)
+    # trades, equity_curve = run_backtest_simulation(df)
     pass
