@@ -143,6 +143,16 @@ with tabs[1]:
         col2.metric("Win Rate (%)", f"{win_rate:.2f}" if not trades_df.empty else "N/A")
         col3.metric("Net PnL", f"₹{trades_df['net_pnl'].sum():,.2f}" if not trades_df.empty else "N/A")
 
+        # Best and Worst trades
+        if not trades_df.empty:
+            best_trade = trades_df.loc[trades_df['net_pnl'].idxmax()]
+            worst_trade = trades_df.loc[trades_df['net_pnl'].idxmin()]
+            col1, col2 = st.columns(2)
+            col1.success("Best Trade")
+            col1.json(best_trade.to_dict())
+            col2.error("Worst Trade")
+            col2.json(worst_trade.to_dict())
+
 
         st.subheader(f"Trades for {symbol_select.upper()}")
 
