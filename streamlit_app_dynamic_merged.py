@@ -103,14 +103,25 @@ with tabs[0]:
             c4.metric("Sharpe Ratio", f"{sharpe:.2f}" if not np.isnan(sharpe) else "N/A")
             c5.metric("Sortino Ratio", f"{sortino:.2f}" if not np.isnan(sortino) else "N/A")
 
-            # Portfolio equity curve
-            st.subheader("Portfolio Equity Curve")
-            fig, ax = plt.subplots(figsize=(10, 4))
-            portfolio_equity.plot(ax=ax, color='blue', linewidth=2)
-            ax.set_xlabel("Date")
-            ax.set_ylabel("Portfolio Value (₹)")
-            ax.grid(True)
-            st.pyplot(fig)
+            # Portfolio-wide waterfall chart
+            all_trades_combined = pd.concat(all_trades.values()).sort_values("exit_time")
+            if not all_trades_combined.empty:
+                cum = 0
+                bottoms = []
+                for pnl in all_trades_combined["net_pnl"]:
+                    bottoms.append(cum)
+                    cum += pnl
+                fig_water, ax_water = plt.subplots(figsize=(12, 4))
+                ax_water.bar(
+                    range(len(all_trades_combined)),
+                    all_trades_combined["net_pnl"],
+                    bottom=bottoms,
+                    color=["green" if x >= 0 else "red" for x in all_trades_combined["net_pnl"]],
+                )
+                ax_water.set_xlabel("Trade Index")
+                ax_water.set_ylabel("Net PnL (₹)")
+                ax_water.set_title("Trade-by-Trade Net PnL Contribution (Portfolio)")
+                st.pyplot(fig_water)
 
             # Allocation pie chart
             final_values = [
@@ -156,46 +167,6 @@ with tabs[0]:
             df_summary = pd.DataFrame(summary_data)
             st.subheader("Portfolio Leaderboard")
             st.dataframe(df_summary.sort_values("Net PnL", ascending=False))
-
-            # Portfolio-wide waterfall chart
-            st.subheader("Portfolio PnL Waterfall")
-            all_trades_combined = pd.concat(all_trades.values()).sort_values("exit_time")
-            if not all_trades_combined.empty:
-                cum = 0
-                bottoms = []
-                for pnl in all_trades_combined["net_pnl"]:
-                    bottoms.append(cum)
-                    cum += pnl
-                fig_water, ax_water = plt.subplots(figsize=(12, 4))
-                ax_water.bar(
-                    range(len(all_trades_combined)),
-                    all_trades_combined["net_pnl"],
-                    bottom=bottoms,
-                    color=["green" if x >= 0 else "red" for x in all_trades_combined["net_pnl"]],
-                )
-                ax_water.set_xlabel("Trade Index")
-                ax_water.set_ylabel("Net PnL (₹)")
-                ax_water.set_title("Trade-by-Trade Net PnL Contribution (Portfolio)")
-                st.pyplot(fig_water)
-
-            # Correlation heatmap
-            if len(all_equity_curves) > 1:
-                st.subheader("Portfolio Asset Correlation Heatmap")
-                returns_df = pd.DataFrame()
-                for symbol, eq_curve in all_equity_curves.items():
-                    returns_df[symbol.upper()] = eq_curve.pct_change()
-                corr = returns_df.corr()
-                fig_corr = go.Figure(
-                    data=go.Heatmap(
-                        z=corr.values,
-                        x=corr.columns,
-                        y=corr.index,
-                        colorscale="Blues",
-                        colorbar=dict(title="Correlation"),
-                    )
-                )
-                fig_corr.update_layout(title="Correlation Matrix of Daily Returns")
-                st.plotly_chart(fig_corr)
 
 # ===== Per Symbol Analysis Tab =====
 with tabs[1]:
@@ -284,39 +255,6 @@ with tabs[1]:
             ax_roll.legend()
             st.pyplot(fig_roll)
 
-            # Trade scatter, histogram
-            st.subheader(f"Trade Scatter: PnL vs Duration ({symbol_select.upper()})")
-            fig_scatter = go.Figure()
-            fig_scatter.add_trace(
-                go.Scatter(
-                    x=trades_df["duration_min"],
-                    y=trades_df["net_pnl"],
-                    mode="markers",
-                    marker=dict(
-                        size=10,
-                        color=trades_df["net_pnl"],
-                        colorscale="RdYlGn",
-                        colorbar=dict(title="Net PnL"),
-                        showscale=True,
-                    ),
-                    name="Trade PnL vs Duration",
-                )
-            )
-            fig_scatter.update_layout(
-                title=f"Trade PnL vs Duration for {symbol_select.upper()}",
-                xaxis_title="Duration (minutes)",
-                yaxis_title="Net PnL (₹)",
-            )
-            st.plotly_chart(fig_scatter)
-
-            st.subheader(f"Trade PnL Histogram ({symbol_select.upper()})")
-            fig_hist, ax = plt.subplots(figsize=(10, 4))
-            ax.hist(trades_df["net_pnl"], bins=30, color="skyblue", edgecolor="black")
-            ax.set_xlabel("Net PnL")
-            ax.set_ylabel("Frequency")
-            ax.set_title(f"Trade PnL Distribution ({symbol_select.upper()})")
-            st.pyplot(fig_hist)
-
             # Waterfall chart
             st.subheader(f"Trade Waterfall Chart ({symbol_select.upper()})")
             cum = 0
@@ -335,22 +273,6 @@ with tabs[1]:
             ax_water.set_ylabel("Net PnL (₹)")
             ax_water.set_title(f"Trade-by-Trade Net PnL Contribution ({symbol_select.upper()})")
             st.pyplot(fig_water)
-
-            # Timeline chart (entry to exit)
-            st.subheader(f"Trade Timeline ({symbol_select.upper()})")
-            fig_timeline, ax = plt.subplots(figsize=(12, 5))
-            colors = {"Buy": "green", "Short Sell": "red"}
-            for i, row in trades_df.iterrows():
-                ax.plot(
-                    [row["entry_time"], row["exit_time"]],
-                    [i, i],
-                    color=colors.get(row["trade_type"], "gray"),
-                    linewidth=3,
-                )
-            ax.set_xlabel("Date")
-            ax.set_ylabel("Trade Index")
-            ax.set_title(f"Trade Duration Timeline ({symbol_select.upper()})")
-            st.pyplot(fig_timeline)
 
             # Individual win/loss pie chart
             st.subheader(f"Win/Loss Pie for {symbol_select.upper()}")
