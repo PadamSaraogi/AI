@@ -126,6 +126,13 @@ with tabs[1]:
         trades_df = all_trades[symbol_select]
         equity_curve = all_equity_curves[symbol_select]
 
+        # Advanced KPIs in one row with 3 columns
+        st.markdown("### Key Metrics")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Trades", len(trades_df))
+        col2.metric("Win Rate (%)", f"{win_rate:.2f}" if not trades_df.empty else "N/A")
+        col3.metric("Net PnL", f"₹{trades_df['net_pnl'].sum():,.2f}" if not trades_df.empty else "N/A")
+
         # Equity curve plot
         st.markdown("### Equity Curve")
         fig_eq, ax = plt.subplots(figsize=(10,4))
@@ -135,13 +142,6 @@ with tabs[1]:
         ax.set_ylabel("Capital (₹)")
         ax.grid(True)
         st.pyplot(fig_eq)
-
-        # Advanced KPIs in one row with 3 columns
-        st.markdown("### Key Metrics")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Trades", len(trades_df))
-        col2.metric("Win Rate (%)", f"{win_rate:.2f}" if not trades_df.empty else "N/A")
-        col3.metric("Net PnL", f"₹{trades_df['net_pnl'].sum():,.2f}" if not trades_df.empty else "N/A")
 
         # Best and Worst trades
         if not trades_df.empty:
@@ -175,12 +175,6 @@ with tabs[1]:
             mime='text/csv'
         )
 
-        # Advanced KPIs
-        st.markdown("### Key Metrics")
-        st.metric("Total Trades", len(trades_df))
-        st.metric("Win Rate (%)", f"{win_rate:.2f}" if not trades_df.empty else "N/A")
-        st.metric("Net PnL", f"₹{trades_df['net_pnl'].sum():,.2f}" if not trades_df.empty else "N/A")
-
         # Win/Loss pie chart
         win_counts = trades_df['net_pnl'].apply(lambda x: 'Win' if x > 0 else 'Loss').value_counts()
         fig_pie = go.Figure(data=[go.Pie(
@@ -193,26 +187,6 @@ with tabs[1]:
         )])
         fig_pie.update_layout(title="Win/Loss Breakdown", showlegend=False)
         st.plotly_chart(fig_pie)
-
-        # Best and Worst trades
-        if not trades_df.empty:
-            best_trade = trades_df.loc[trades_df['net_pnl'].idxmax()]
-            worst_trade = trades_df.loc[trades_df['net_pnl'].idxmin()]
-            col1, col2 = st.columns(2)
-            col1.success("Best Trade")
-            col1.json(best_trade.to_dict())
-            col2.error("Worst Trade")
-            col2.json(worst_trade.to_dict())
-
-        # Equity curve plot
-        st.markdown("### Equity Curve")
-        fig_eq, ax = plt.subplots(figsize=(10,4))
-        equity_curve.plot(ax=ax, color="green", linewidth=2)
-        ax.set_title(f"{symbol_select.upper()} Equity Curve")
-        ax.set_xlabel("Date")
-        ax.set_ylabel("Capital (₹)")
-        ax.grid(True)
-        st.pyplot(fig_eq)
 
 # === All Equity Curves Tab ===
 with tabs[2]:
