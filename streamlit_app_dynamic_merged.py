@@ -96,12 +96,17 @@ with tabs[0]:
                 max_drawdown = sharpe = sortino = volatility = np.nan
 
             st.markdown("### Portfolio Key Metrics")
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("Total Trades", total_trades)
-            c2.metric("Net PnL (₹)", f"{total_net_pnl:,.2f}")
-            c3.metric("Max Drawdown", f"{max_drawdown:.2%}" if not np.isnan(max_drawdown) else "N/A")
-            c4.metric("Sharpe Ratio", f"{sharpe:.2f}" if not np.isnan(sharpe) else "N/A")
-            c5.metric("Sortino Ratio", f"{sortino:.2f}" if not np.isnan(sortino) else "N/A")
+            # Arrange in two rows, three columns
+            r1c1, r1c2, r1c3 = st.columns(3)
+            r2c1, r2c2, r2c3 = st.columns(3)
+            
+            r1c1.metric("Total Trades", f"{total_trades}")
+            r1c2.metric("Net PnL (₹)", f"₹{net_pnl:,.2f}")
+            r1c3.metric("Returns (%)", f"{portfolio_return*100:.2f}%")
+            
+            r2c1.metric("Buy & Hold Returns (%)", f"{buy_and_hold_return*100:.2f}%")
+            r2c2.metric("Win Rate (%)", f"{win_rate*100:.2f}%")
+            r2c3.metric("Expectancy (₹/Trade)", f"₹{expectancy:,.2f}")
 
             all_trades_combined = pd.concat(all_trades.values()).sort_values("exit_time")
             if not all_trades_combined.empty:
