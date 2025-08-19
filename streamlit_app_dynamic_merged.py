@@ -150,7 +150,7 @@ with tabs[0]:
             
             r1c1.metric("Total Trades", f"{total_trades}")
             r1c2.metric("Portfolio Value (₹)", f"₹{total_net_pnl:,.2f}")
-            r1c3.metric("Returns (%)", f"{portfolio_return*100-100:.2f}%")
+            r1c3.metric("Returns (%)", f"{portfolio_return*100:.2f}%")
             
             r2c1.metric("Buy & Hold Returns (%)", f"{buy_and_hold_return*100:.2f}%")
             r2c2.metric("Win Rate (%)", f"{win_rate*100:.2f}%")
