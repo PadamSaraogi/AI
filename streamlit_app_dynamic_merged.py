@@ -92,6 +92,42 @@ with tabs[0]:
                 sharpe = daily_returns.mean() / volatility * np.sqrt(252) if volatility != 0 else np.nan
                 downside_std = daily_returns[daily_returns < 0].std()
                 sortino = daily_returns.mean() / downside_std * np.sqrt(252) if downside_std != 0 else np.nan
+                if portfolio_equity is not None and len(portfolio_equity) > 1:
+                    start_val = portfolio_equity.iloc[0]
+                    end_val = portfolio_equity.iloc[-1]
+                    portfolio_return = (end_val / start_val) - 1
+                else:
+                    portfolio_return = 0.0
+                portfolio_buy_hold_final_value = 0
+                buy_and_hold_start_capital = capital_per_stock * len(included_symbols) if included_symbols else 0
+                
+                for symbol in included_symbols:
+                    trades_df = all_trades[symbol]
+                    signals = stock_data[symbol]["signals"].sort_index()
+                    if trades_df.empty:
+                        continue
+                    first_time = trades_df['entry_time'].values[0]
+                    last_time = trades_df['exit_time'].values[-1]
+                    first_time_ts = pd.to_datetime(first_time)
+                    last_time_ts = pd.to_datetime(last_time)
+                
+                    start_idx = signals.index.get_indexer([first_time_ts], method='nearest')[0]
+                    end_idx = signals.index.get_indexer([last_time_ts], method='nearest')[0]
+                
+                    start_price = signals.iloc[start_idx]['close']
+                    end_price = signals.iloc[end_idx]['close']
+                
+                    qty = int(capital_per_stock // start_price)
+                    leftover_cash = capital_per_stock - qty * start_price
+                
+                    # Final portfolio value for this symbol using Buy & Hold
+                    final_value = qty * end_price + leftover_cash
+                    portfolio_buy_hold_final_value += final_value
+                
+                if buy_and_hold_start_capital > 0:
+                    buy_and_hold_return = (portfolio_buy_hold_final_value / buy_and_hold_start_capital) - 1
+                else:
+                    buy_and_hold_return = 0.0
             else:
                 max_drawdown = sharpe = sortino = volatility = np.nan
 
