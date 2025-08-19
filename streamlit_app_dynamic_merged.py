@@ -128,6 +128,18 @@ with tabs[0]:
                     buy_and_hold_return = (portfolio_buy_hold_final_value / buy_and_hold_start_capital) - 1
                 else:
                     buy_and_hold_return = 0.0
+                all_trades_concat = pd.concat(all_trades.values()) if all_trades else pd.DataFrame()
+
+                if not all_trades_concat.empty:
+                    win_rate = (all_trades_concat['net_pnl'] > 0).mean()
+                else:
+                    win_rate = 0.0
+                all_trades_concat = pd.concat(all_trades.values()) if all_trades else pd.DataFrame()
+
+                if not all_trades_concat.empty:
+                    expectancy = all_trades_concat['net_pnl'].mean()
+                else:
+                    expectancy = 0.0
             else:
                 max_drawdown = sharpe = sortino = volatility = np.nan
 
