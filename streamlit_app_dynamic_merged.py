@@ -104,16 +104,17 @@ with tabs[0]:
             c4.metric("Sharpe Ratio", f"{sharpe:.2f}" if not np.isnan(sharpe) else "N/A")
             c5.metric("Sortino Ratio", f"{sortino:.2f}" if not np.isnan(sortino) else "N/A")
 
-            # Portfolio-wide waterfall chart with correct Buy & Hold calculation
+            # Portfolio-wide waterfall chart with correctly plotted flat Buy & Hold line
             all_trades_combined = pd.concat(all_trades.values()).sort_values("exit_time")
             if not all_trades_combined.empty:
+                # Compute cumulative strategy PnL for waterfall
                 cum = 0
                 bottoms = []
                 for pnl in all_trades_combined["net_pnl"]:
                     bottoms.append(cum)
                     cum += pnl
             
-                # ==== Buy & Hold Calculation ====
+                # Calculate total portfolio Buy & Hold PnL (only once per symbol)
                 portfolio_buy_hold_pnl = 0
                 for symbol in included_symbols:
                     trades_df = all_trades[symbol]
@@ -124,17 +125,12 @@ with tabs[0]:
                     last_time = trades_df['exit_time'].values[-1]
                     first_time_ts = pd.to_datetime(first_time)
                     last_time_ts = pd.to_datetime(last_time)
-                    start_idx = signals.index.get_indexer([first_time_ts], method='nearest')
-                    end_idx = signals.index.get_indexer([last_time_ts], method='nearest')
+                    start_idx = signals.index.get_indexer([first_time_ts], method='nearest')[0]
+                    end_idx = signals.index.get_indexer([last_time_ts], method='nearest')[0]
                     start_price = signals.iloc[start_idx]['close']
                     end_price = signals.iloc[end_idx]['close']
-                    qty = int(capital_per_stock // start_price)    # Buy whole shares only
-                    buy_hold_initial = qty * start_price           # Initial investment in shares
-                    buy_hold_final = qty * end_price               # Final value of shares
-                    buy_hold_pnl = buy_hold_final - buy_hold_initial
-                    # Optionally, include leftover cash in final value:
-                    # leftover_cash = capital_per_stock - buy_hold_initial
-                    # buy_hold_pnl = qty * (end_price - start_price) + leftover_cash
+                    qty = int(capital_per_stock // start_price)
+                    buy_hold_pnl = qty * (end_price - start_price)  # Only price appreciation * quantity
                     portfolio_buy_hold_pnl += buy_hold_pnl
             
                 fig_water, ax_water = plt.subplots(figsize=(12, 4))
@@ -145,7 +141,7 @@ with tabs[0]:
                     color=["green" if x >= 0 else "red" for x in all_trades_combined["net_pnl"]],
                     label='Strategy Cumulative'
                 )
-                # Plot buy & hold as a horizontal line
+                # Plot flat Buy & Hold line across full trade index range
                 ax_water.axhline(y=portfolio_buy_hold_pnl, color='blue', linewidth=2, label='Buy & Hold')
                 ax_water.set_xlabel("Trade Index")
                 ax_water.set_ylabel("Net PnL (₹)")
