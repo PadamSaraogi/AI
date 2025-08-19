@@ -140,6 +140,7 @@ with tabs[0]:
                     expectancy = all_trades_concat['net_pnl'].mean()
                 else:
                     expectancy = 0.0
+                adjusted_return = (portfolio_return - 1) * 100
             else:
                 max_drawdown = sharpe = sortino = volatility = np.nan
 
@@ -150,7 +151,7 @@ with tabs[0]:
             
             r1c1.metric("Total Trades", f"{total_trades}")
             r1c2.metric("Portfolio Value (₹)", f"₹{total_net_pnl:,.2f}")
-            r1c3.metric("Returns (%)", f"{portfolio_return*100:.2f}%")
+            r1c3.metric("Returns (%)", f"{adjusted_return:.2f}%")
             
             r2c1.metric("Buy & Hold Returns (%)", f"{buy_and_hold_return*100:.2f}%")
             r2c2.metric("Win Rate (%)", f"{win_rate*100:.2f}%")
