@@ -141,6 +141,27 @@ with tabs[0]:
                 else:
                     expectancy = 0.0
                 adjusted_return = (portfolio_return - 1) * 100
+                # Sum initial value for all stocks actually included in the portfolio
+                initial_value = 0
+                final_value = 0
+                
+                for symbol in included_symbols:
+                    df_signals = stock_data[symbol]['signals']
+                    trades_df = all_trades[symbol]
+                    if trades_df.empty or df_signals.empty:
+                        continue
+                    # Initial value: capital allocated per stock (what you intended to invest)
+                    initial_value += capital_per_stock
+                
+                    # Final value: capital left after all trades (use last equity value for symbol)
+                    final_value += trades_df['capital_after_trade'].iloc[-1]  # assuming this column tracks final capital for the symbol
+                
+                # Compute portfolio return based on these true values
+                if initial_value > 0:
+                    portfolio_return = (final_value / initial_value) - 1
+                else:
+                    portfolio_return = 0.0
+
             else:
                 max_drawdown = sharpe = sortino = volatility = np.nan
 
@@ -151,8 +172,8 @@ with tabs[0]:
             
             r1c1.metric("Total Trades", f"{total_trades}")
             r1c2.metric("Portfolio Value (₹)", f"₹{total_net_pnl:,.2f}")
-            r1c3.metric("Returns (%)", f"{adjusted_return:.2f}%")
-            
+            r1c3.metric("Returns (%)", f"{portfolio_return*100:.2f}%")
+
             r2c1.metric("Buy & Hold Returns (%)", f"{buy_and_hold_return*100:.2f}%")
             r2c2.metric("Win Rate (%)", f"{win_rate*100:.2f}%")
             r2c3.metric("Expectancy (₹/Trade)", f"₹{expectancy:,.2f}")
