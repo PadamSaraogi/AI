@@ -304,6 +304,19 @@ with tabs[1]:
         ax.grid(True)
         st.pyplot(fig_eq)
 
+        if not trades_df.empty:
+            best_trade = trades_df.loc[trades_df['net_pnl'].idxmax()]
+            worst_trade = trades_df.loc[trades_df['net_pnl'].idxmin()]
+        
+            st.subheader("Best Trade")
+            st.json(best_trade.to_dict())
+        
+            st.subheader("Worst Trade")
+            st.json(worst_trade.to_dict())
+        else:
+            st.info("No trade data available for selected symbol.")
+
+
         st.subheader(f"{symbol_select.upper()} Drawdown")
         eq_cumret = equity_curve / equity_curve.iloc[0]
         drawdowns = eq_cumret / eq_cumret.cummax() - 1
