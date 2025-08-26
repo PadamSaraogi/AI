@@ -306,6 +306,21 @@ with tabs[1]:
             c1.metric("Total Trades", len(trades_df))
             c2.metric("Win Rate (%)", f"{win_rate:.2f}")
             c3.metric("Net PnL (₹)", f"{trades_df['net_pnl'].sum():,.2f}")
+
+            if trades_df is not None and not trades_df.empty:
+                st.subheader(f"All Trades for {symbol_select.upper()}")
+                st.dataframe(trades_df)
+                # Optional: Add CSV download
+                csv_download = trades_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    f"Download {symbol_select.upper()} Trades as CSV",
+                    csv_download,
+                    file_name=f"{symbol_select}_trades.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("No trade data available for selected symbol.")
+
             st.subheader(f"{symbol_select.upper()} Equity Curve")
             fig_eq, ax = plt.subplots(figsize=(10, 4))
             equity_curve.plot(ax=ax, color="green", linewidth=2)
