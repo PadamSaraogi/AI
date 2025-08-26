@@ -307,10 +307,19 @@ with tabs[1]:
             c2.metric("Win Rate (%)", f"{win_rate:.2f}")
             c3.metric("Net PnL (₹)", f"{trades_df['net_pnl'].sum():,.2f}")
 
-            if trades_df is not None and not trades_df.empty:
+            symbol_select = st.selectbox("Select Symbol", symbols_list, format_func=lambda s: s.upper())
+            capital_per_stock = total_portfolio_capital // n_stocks
+            trades_df, equity_curve = run_backtest_simulation(
+                stock_data[symbol_select]['signals'],
+                starting_capital=capital_per_stock,
+                risk_per_trade=risk_per_trade,
+            )
+            st.write(f"Number of trades: {len(trades_df)}")   # Debug line
+            
+            if not trades_df.empty:
                 st.subheader(f"All Trades for {symbol_select.upper()}")
-                st.dataframe(trades_df)
-                # Optional: Add CSV download
+                st.dataframe(trades_df.sort_values("exit_time").reset_index(drop=True))
+                # Optional download:
                 csv_download = trades_df.to_csv(index=False).encode('utf-8')
                 st.download_button(
                     f"Download {symbol_select.upper()} Trades as CSV",
