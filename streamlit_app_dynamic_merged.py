@@ -350,6 +350,11 @@ with tabs[1]:
                 ))
                 fig_candle.update_layout(title=f"{symbol_select.upper()} Price & Trades", xaxis_title="Date", yaxis_title="Price")
                 st.plotly_chart(fig_candle)
+            
+            st.subheader(f"All Trades ({symbol_select.upper()})")
+            st.dataframe(trades_df.sort_values("exit_time").reset_index(drop=True))
+
+            
             # Waterfall chart
             st.subheader(f"Trade Waterfall Chart ({symbol_select.upper()})")
             cum = 0
