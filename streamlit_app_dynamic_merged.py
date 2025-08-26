@@ -405,7 +405,84 @@ with tabs[2]:
         st.warning("Upload data files to compare equity curves.")
     else:
         st.subheader("All Stocks Equity Curves")
-        fig, ax = plt.subplots(figsize=(12, 6))
+
+        # Date range filter inputs
+        all_dates = []
+        for symbol in symbols_list:
+            df_signals = stock_data[symbol]['signals']
+            all_dates.extend([df_signals.index.min(), df_signals.index.max()])
+
+        min_date = min(all_dates)
+        max_date = max(all_dates)
+
+        date_filter = st.date_input(
+            "Date Range Filter",
+            value=(min_date, max_date),
+            min_value=min_date,
+            max_value=max_date,
+            help="Filter equity curves by date range"
+        )
+        start_date, end_date = pd.to_datetime(date_filter[0]), pd.to_datetime(date_filter[1])
+
+        fig = go.Figure()
+        perf_summary = []
+
+        for symbol in symbols_list:
+            capital_per_stock = total_portfolio_capital // n_stocks
+            trades_df, eq_curve = run_backtest_simulation(
+                stock_data[symbol]['signals'],
+                starting_capital=capital_per_stock,
+                risk_per_trade=risk_per_trade,
+            )
+            # Filter equity curve by selected date range
+            eq_curve_filtered = eq_curve[(eq_curve.index >= start_date) & (eq_curve.index <= end_date)]
+
+            # Normalize equity curve to start at 100
+            eq_norm = eq_curve_filtered / eq_curve_filtered.iloc[0] * 100
+
+            fig.add_trace(go.Scatter(
+                x=eq_norm.index,
+                y=eq_norm.values,
+                mode='lines',
+                name=symbol.upper(),
+                hovertemplate='%{x|%Y-%m-%d}<br>%{y:.2f}',
+                line=dict(width=2)
+            ))
+
+            # Calculate performance stats
+            total_return_pct = (eq_curve.iloc[-1] / eq_curve.iloc[0] - 1) * 100 if len(eq_curve) > 1 else 0
+            max_dd = ((eq_curve / eq_curve.cummax()) - 1).min() * 100 if len(eq_curve) > 1 else 0
+            daily_rets = eq_curve.pct_change().dropna()
+            sharpe = (daily_rets.mean() / daily_rets.std()) * np.sqrt(252) if daily_rets.std() > 0 else np.nan
+
+            perf_summary.append({
+                'Symbol': symbol.upper(),
+                'Total Return (%)': f"{total_return_pct:.2f}",
+                'Max Drawdown (%)': f"{max_dd:.2f}",
+                'Sharpe Ratio': f"{sharpe:.2f}",
+            })
+
+        fig.update_layout(
+            title="Normalized Equity Curves",
+            xaxis_title="Date",
+            yaxis_title="Normalized Capital (Start = 100)",
+            hovermode="x unified",
+            legend_title="Stocks",
+            height=600,
+            template="plotly_white"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show performance metrics table
+        df_perf = pd.DataFrame(perf_summary)
+        st.subheader("Equity Curve Performance Summary")
+        st.dataframe(df_perf.style.format({"Total Return (%)": "{:.2f}", 
+                                           "Max Drawdown (%)": "{:.2f}", 
+                                           "Sharpe Ratio": "{:.2f}"}))
+
+        # CSV download of equity data option
+        csv_combined_data = []
         for symbol in symbols_list:
             capital_per_stock = total_portfolio_capital // n_stocks
             _, eq_curve = run_backtest_simulation(
@@ -413,10 +490,15 @@ with tabs[2]:
                 starting_capital=capital_per_stock,
                 risk_per_trade=risk_per_trade,
             )
-            eq_curve.plot(ax=ax, label=symbol.upper())
-        ax.set_xlabel("Date")
-        ax.set_ylabel("Capital (₹)")
-        ax.set_title("Per-Stock Equity Curves")
-        ax.legend()
-        ax.grid(True)
-        st.pyplot(fig)
+            tmp_df = pd.DataFrame({symbol.upper(): eq_curve})
+            csv_combined_data.append(tmp_df)
+
+        df_equities = pd.concat(csv_combined_data, axis=1).dropna()
+        csv_data = df_equities.to_csv().encode('utf-8')
+
+        st.download_button(
+            label="Download Equity Curves Data as CSV",
+            data=csv_data,
+            file_name='equity_curves.csv',
+            mime='text/csv'
+        )
