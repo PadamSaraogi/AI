@@ -120,7 +120,6 @@ with tabs[0]:
                     qty = int(capital_per_stock // start_price)
                     leftover_cash = capital_per_stock - qty * start_price
                 
-                    # Final portfolio value for this symbol using Buy & Hold
                     final_value = qty * end_price + leftover_cash
                     portfolio_buy_hold_final_value += final_value
                 
@@ -141,7 +140,6 @@ with tabs[0]:
                 else:
                     expectancy = 0.0
                 adjusted_return = (portfolio_return - 1) * 100
-                # Sum initial value and final value for all stocks in portfolio
                 initial_value = 0
                 final_value = 0
                 
@@ -152,17 +150,14 @@ with tabs[0]:
                     initial_value += capital_per_stock
                     final_value += trades_df['capital_after_trade'].iloc[-1]  # final symbol value
                 
-                # Calculate % increase (profit as % of initial capital)
                 if initial_value > 0:
                     increase_percent = ((total_net_pnl - total_portfolio_capital) / total_portfolio_capital) * 100
                 else:
                     increase_percent = 0.0
-
             else:
                 max_drawdown = sharpe = sortino = volatility = np.nan
 
             st.markdown("### Portfolio Key Metrics")
-            # Arrange in two rows, three columns
             r1c1, r1c2, r1c3 = st.columns(3)
             r2c1, r2c2, r2c3 = st.columns(3)
             
@@ -182,7 +177,6 @@ with tabs[0]:
                     bottoms.append(cum)
                     cum += pnl
 
-                # Calculate qty per symbol at start
                 qty_map = {}
                 for symbol in included_symbols:
                     trades_df = all_trades[symbol]
@@ -196,7 +190,6 @@ with tabs[0]:
                     start_price = signals.iloc[start_idx]['close']
                     qty_map[symbol] = int(capital_per_stock // start_price)
 
-                # Calculate Buy & Hold PnL over trade exit times
                 buy_hold_pnl_over_time = []
                 initial_portfolio_value = capital_per_stock * len(included_symbols)
 
@@ -239,7 +232,6 @@ with tabs[0]:
                 ax_water.legend()
                 st.pyplot(fig_water)
 
-            # Allocation pie chart
             final_values = [
                 all_trades[s]["capital_after_trade"].iloc[-1] if not all_trades[s].empty else capital_per_stock
                 for s in included_symbols
@@ -253,7 +245,6 @@ with tabs[0]:
             fig_alloc.update_layout(title="Portfolio Allocation by Final Capital")
             st.plotly_chart(fig_alloc)
 
-            # Portfolio drawdown chart
             st.subheader("Portfolio Drawdown")
             fig_dd, ax_dd = plt.subplots(figsize=(10, 4))
             drawdowns.plot(ax=ax_dd, color="red")
@@ -262,7 +253,6 @@ with tabs[0]:
             ax_dd.grid(True)
             st.pyplot(fig_dd)
 
-            # Portfolio leaderboard
             summary_data = []
             for symbol in included_symbols:
                 trades_df = all_trades[symbol]
@@ -284,7 +274,7 @@ with tabs[0]:
             st.subheader("Portfolio Leaderboard")
             st.dataframe(df_summary.sort_values("Net PnL", ascending=False))
 
-# = Per Symbol Analysis Tab =
+# Per Symbol Analysis Tab
 with tabs[1]:
     if n_stocks == 0:
         st.warning("Upload data files to analyze individual stocks.")
@@ -298,103 +288,91 @@ with tabs[1]:
             starting_capital=capital_per_stock,
             risk_per_trade=risk_per_trade,
         )
-        if trades_df.empty:
-            st.info("No trade data available for selected symbol.")
+        st.write(f"Number of trades: {len(trades_df)}")   # Debug line
+
+        if not trades_df.empty:
+            st.subheader(f"All Trades for {symbol_select.upper()}")
+            st.dataframe(trades_df.sort_values("exit_time").reset_index(drop=True))
+            csv_download = trades_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                f"Download {symbol_select.upper()} Trades as CSV",
+                csv_download,
+                file_name=f"{symbol_select}_trades.csv",
+                mime="text/csv"
+            )
         else:
-            win_rate = (trades_df["net_pnl"] > 0).mean() * 100
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total Trades", len(trades_df))
-            c2.metric("Win Rate (%)", f"{win_rate:.2f}")
-            c3.metric("Net PnL (₹)", f"{trades_df['net_pnl'].sum():,.2f}")
+            st.info("No trade data available for selected symbol.")
 
-            symbol_select = st.selectbox("Select Symbol", symbols_list, format_func=lambda s: s.upper())
-            capital_per_stock = total_portfolio_capital // n_stocks
-            trades_df, equity_curve = run_backtest_simulation(
-                stock_data[symbol_select]['signals'],
-                starting_capital=capital_per_stock,
-                risk_per_trade=risk_per_trade,
-            )
-            st.write(f"Number of trades: {len(trades_df)}")   # Debug line
-            
-            if not trades_df.empty:
-                st.subheader(f"All Trades for {symbol_select.upper()}")
-                st.dataframe(trades_df.sort_values("exit_time").reset_index(drop=True))
-                # Optional download:
-                csv_download = trades_df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    f"Download {symbol_select.upper()} Trades as CSV",
-                    csv_download,
-                    file_name=f"{symbol_select}_trades.csv",
-                    mime="text/csv"
-                )
-            else:
-                st.info("No trade data available for selected symbol.")
+        win_rate = (trades_df["net_pnl"] > 0).mean() * 100 if not trades_df.empty else 0
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total Trades", len(trades_df))
+        c2.metric("Win Rate (%)", f"{win_rate:.2f}")
+        c3.metric("Net PnL (₹)", f"{trades_df['net_pnl'].sum():,.2f}" if not trades_df.empty else "0.00")
 
-            st.subheader(f"{symbol_select.upper()} Equity Curvea")
-            fig_eq, ax = plt.subplots(figsize=(10, 4))
-            equity_curve.plot(ax=ax, color="green", linewidth=2)
-            ax.set_xlabel("Date")
-            ax.set_ylabel("Capital (₹)")
-            ax.grid(True)
-            st.pyplot(fig_eq)
-            # Individual symbol drawdown
-            st.subheader(f"{symbol_select.upper()} Drawdown")
-            eq_cumret = equity_curve / equity_curve.iloc[0]
-            drawdowns = eq_cumret / eq_cumret.cummax() - 1
-            fig_dd, ax_dd = plt.subplots(figsize=(10, 4))
-            drawdowns.plot(ax=ax_dd, color="red")
-            ax_dd.set_ylabel("Drawdown")
-            ax_dd.set_xlabel("Date")
-            ax_dd.grid(True)
-            st.pyplot(fig_dd)
-            # Candlestick chart with trade overlay
-            st.subheader(f"Candlestick Chart with Trades ({symbol_select.upper()})")
-            signals_df = stock_data[symbol_select]['signals']
-            if {'open','high','low','close'}.issubset(signals_df.columns):
-                fig_candle = go.Figure(data=[go.Candlestick(
-                    x=signals_df.index,
-                    open=signals_df['open'],
-                    high=signals_df['high'],
-                    low=signals_df['low'],
-                    close=signals_df['close']
-                )])
-                fig_candle.add_trace(go.Scatter(
-                    x=trades_df['entry_time'],
-                    y=trades_df['entry_price'],
-                    mode='markers',
-                    marker=dict(symbol='triangle-up', color='green', size=9),
-                    name='Buy Entry'
-                ))
-                fig_candle.add_trace(go.Scatter(
-                    x=trades_df['exit_time'],
-                    y=trades_df['final_exit_price'],
-                    mode='markers',
-                    marker=dict(symbol='triangle-down', color='red', size=9),
-                    name='Exit'
-                ))
-                fig_candle.update_layout(title=f"{symbol_select.upper()} Price & Trades", xaxis_title="Date", yaxis_title="Price")
-                st.plotly_chart(fig_candle)
-            
-            # Waterfall chart
-            st.subheader(f"Trade Waterfall Chart ({symbol_select.upper()})")
-            cum = 0
-            bottoms = []
-            for pnl in trades_df["net_pnl"]:
-                bottoms.append(cum)
-                cum += pnl
-            fig_water, ax_water = plt.subplots(figsize=(12, 4))
-            ax_water.bar(
-                range(len(trades_df)),
-                trades_df["net_pnl"],
-                bottom=bottoms,
-                color=["green" if x >= 0 else "red" for x in trades_df["net_pnl"]],
-            )
-            ax_water.set_xlabel("Trade Index")
-            ax_water.set_ylabel("Net PnL (₹)")
-            ax_water.set_title(f"Trade-by-Trade Net PnL Contribution ({symbol_select.upper()})")
-            st.pyplot(fig_water)
+        st.subheader(f"{symbol_select.upper()} Equity Curve")
+        fig_eq, ax = plt.subplots(figsize=(10, 4))
+        equity_curve.plot(ax=ax, color="green", linewidth=2)
+        ax.set_xlabel("Date")
+        ax.set_ylabel("Capital (₹)")
+        ax.grid(True)
+        st.pyplot(fig_eq)
 
-# = All Equity Curves Tab =
+        st.subheader(f"{symbol_select.upper()} Drawdown")
+        eq_cumret = equity_curve / equity_curve.iloc[0]
+        drawdowns = eq_cumret / eq_cumret.cummax() - 1
+        fig_dd, ax_dd = plt.subplots(figsize=(10, 4))
+        drawdowns.plot(ax=ax_dd, color="red")
+        ax_dd.set_ylabel("Drawdown")
+        ax_dd.set_xlabel("Date")
+        ax_dd.grid(True)
+        st.pyplot(fig_dd)
+
+        st.subheader(f"Candlestick Chart with Trades ({symbol_select.upper()})")
+        signals_df = stock_data[symbol_select]['signals']
+        if {'open','high','low','close'}.issubset(signals_df.columns):
+            fig_candle = go.Figure(data=[go.Candlestick(
+                x=signals_df.index,
+                open=signals_df['open'],
+                high=signals_df['high'],
+                low=signals_df['low'],
+                close=signals_df['close']
+            )])
+            fig_candle.add_trace(go.Scatter(
+                x=trades_df['entry_time'],
+                y=trades_df['entry_price'],
+                mode='markers',
+                marker=dict(symbol='triangle-up', color='green', size=9),
+                name='Buy Entry'
+            ))
+            fig_candle.add_trace(go.Scatter(
+                x=trades_df['exit_time'],
+                y=trades_df['final_exit_price'],
+                mode='markers',
+                marker=dict(symbol='triangle-down', color='red', size=9),
+                name='Exit'
+            ))
+            fig_candle.update_layout(title=f"{symbol_select.upper()} Price & Trades", xaxis_title="Date", yaxis_title="Price")
+            st.plotly_chart(fig_candle)
+
+        st.subheader(f"Trade Waterfall Chart ({symbol_select.upper()})")
+        cum = 0
+        bottoms = []
+        for pnl in trades_df["net_pnl"]:
+            bottoms.append(cum)
+            cum += pnl
+        fig_water, ax_water = plt.subplots(figsize=(12, 4))
+        ax_water.bar(
+            range(len(trades_df)),
+            trades_df["net_pnl"],
+            bottom=bottoms,
+            color=["green" if x >= 0 else "red" for x in trades_df["net_pnl"]],
+        )
+        ax_water.set_xlabel("Trade Index")
+        ax_water.set_ylabel("Net PnL (₹)")
+        ax_water.set_title(f"Trade-by-Trade Net PnL Contribution ({symbol_select.upper()})")
+        st.pyplot(fig_water)
+
+# All Equity Curves Tab
 with tabs[2]:
     if n_stocks == 0:
         st.warning("Upload data files to compare equity curves.")
