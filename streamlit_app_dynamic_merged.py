@@ -330,7 +330,7 @@ with tabs[1]:
             else:
                 st.info("No trade data available for selected symbol.")
 
-            st.subheader(f"{symbol_select.upper()} Equity Curve")
+            st.subheader(f"{symbol_select.upper()} Equity Curvea")
             fig_eq, ax = plt.subplots(figsize=(10, 4))
             equity_curve.plot(ax=ax, color="green", linewidth=2)
             ax.set_xlabel("Date")
