@@ -485,4 +485,32 @@ with tabs[2]:
             file_name="combined_equity_curves.csv",
             mime="text/csv"
         )
+
+        perf_summary = []
+        for symbol, eq_curve in all_equity_curves.items():
+            total_return_pct = (eq_curve.iloc[-1] / eq_curve.iloc[0] - 1) * 100 if len(eq_curve) > 1 else 0
+            drawdown_pct = ((eq_curve / eq_curve.cummax()) - 1).min() * 100 if len(eq_curve) > 1 else 0
+            daily_rets = eq_curve.pct_change().dropna()
+            sharpe_ratio = (daily_rets.mean() / daily_rets.std()) * np.sqrt(252) if daily_rets.std() > 0 else np.nan
+        
+            days = (eq_curve.index[-1] - eq_curve.index[0]).days
+            cagr = ((eq_curve.iloc[-1] / eq_curve.iloc[0]) ** (365 / days) - 1) * 100 if days > 0 else 0
+            calmar = cagr / abs(drawdown_pct) if drawdown_pct != 0 else np.nan
+        
+            perf_summary.append({
+                "Symbol": symbol.upper(),
+                "CAGR (%)": cagr,
+                "Total Return (%)": total_return_pct,
+                "Max Drawdown (%)": drawdown_pct,
+                "Calmar Ratio": calmar,
+                "Sharpe Ratio": sharpe_ratio,
+            })
+        
+        df_perf = pd.DataFrame(perf_summary)
+        for col in ["CAGR (%)", "Total Return (%)", "Max Drawdown (%)", "Calmar Ratio", "Sharpe Ratio"]:
+            df_perf[col] = df_perf[col].astype(float).map("{:.2f}".format)
+        
+        st.markdown("### Advanced Performance Summary")
+        st.dataframe(df_perf)
+
     
