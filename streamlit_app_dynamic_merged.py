@@ -477,9 +477,12 @@ with tabs[2]:
         # Show performance metrics table
         df_perf = pd.DataFrame(perf_summary)
         st.subheader("Equity Curve Performance Summary")
-        st.dataframe(df_perf.style.format({"Total Return (%)": "{:.2f}", 
-                                           "Max Drawdown (%)": "{:.2f}", 
-                                           "Sharpe Ratio": "{:.2f}"}))
+        # Convert and format relevant columns as strings with 2 decimals
+        for col in ["Total Return (%)", "Max Drawdown (%)", "Sharpe Ratio"]:
+            df_perf[col] = df_perf[col].astype(float).map("{:.2f}".format)
+        
+        st.dataframe(df_perf)
+
 
         # CSV download of equity data option
         csv_combined_data = []
