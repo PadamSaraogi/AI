@@ -529,23 +529,23 @@ with tabs[2]:
             streaks.append((prev_win, cur_streak))
             return streaks
         
-            if all_trades:
-                all_trades_concat = pd.concat(all_trades.values())
-                profits = all_trades_concat['net_pnl'] > 0
-                streaks = calculate_streaks(all_trades_concat['net_pnl'].values)
+        if all_trades:
+            all_trades_concat = pd.concat(all_trades.values())
+            profits = all_trades_concat['net_pnl'] > 0
+            streaks = calculate_streaks(all_trades_concat['net_pnl'].values)
             
-                st.markdown("### Win/Loss Streaks")
-                wins = [length for win, length in streaks if win]
-                losses = [length for win, length in streaks if not win]
+            st.markdown("### Win/Loss Streaks")
+            wins = [length for win, length in streaks if win]
+            losses = [length for win, length in streaks if not win]
             
-                fig, ax = plt.subplots(figsize=(12, 4))
-                ax.hist(wins, bins=range(1, max(wins)+2), alpha=0.7, label='Winning Streaks', color='green')
-                ax.hist(losses, bins=range(1, max(losses)+2), alpha=0.7, label='Losing Streaks', color='red')
-                ax.set_xlabel('Streak Length (Number of Trades)')
-                ax.set_ylabel('Frequency')
-                ax.legend()
-                st.pyplot(fig)
-            else:
+            fig, ax = plt.subplots(figsize=(12, 4))
+            ax.hist(wins, bins=range(1, max(wins)+2), alpha=0.7, label='Winning Streaks', color='green')
+            ax.hist(losses, bins=range(1, max(losses)+2), alpha=0.7, label='Losing Streaks', color='red')
+            ax.set_xlabel('Streak Length (Number of Trades)')
+            ax.set_ylabel('Frequency')
+            ax.legend()
+            st.pyplot(fig)
+        else:
                 st.info("No trade data for streak analysis.")
         
         
