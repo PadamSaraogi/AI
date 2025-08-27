@@ -404,8 +404,6 @@ with tabs[2]:
     if n_stocks == 0:
         st.warning("Upload data files to compare equity curves.")
     else:
-        st.subheader("Portfolio and Individual Stocks Analysis")
-
         capital_per_stock = total_portfolio_capital // n_stocks
         all_trades = {}
         all_equity_curves = {}
@@ -420,71 +418,6 @@ with tabs[2]:
             all_trades[symbol] = trades_df
             all_equity_curves[symbol] = eq_curve
 
-        # --- 1. Matplotlib: Per-stock equity curves (absolute) ---
-        st.markdown("### Equity Curves per Stock (Absolute Capital)")
-        fig1, ax1 = plt.subplots(figsize=(12, 6))
-        for symbol, eq_curve in all_equity_curves.items():
-            eq_curve.plot(ax=ax1, label=symbol.upper())
-        ax1.set_xlabel("Date")
-        ax1.set_ylabel("Capital (₹)")
-        ax1.set_title("Equity Curves")
-        ax1.legend()
-        ax1.grid(True)
-        st.pyplot(fig1)
-
-        # --- 2. Portfolio Waterfall of Trade PnL ---
-        st.markdown("### Portfolio Trade PnL Waterfall")
-        all_trades_combined = pd.concat(all_trades.values()).sort_values("exit_time")
-        if not all_trades_combined.empty:
-            cum = 0
-            bottoms = []
-            for pnl in all_trades_combined["net_pnl"]:
-                bottoms.append(cum)
-                cum += pnl
-            fig2, ax2 = plt.subplots(figsize=(12, 4))
-            ax2.bar(range(len(all_trades_combined)),
-                    all_trades_combined["net_pnl"],
-                    bottom=bottoms,
-                    color=["green" if x >= 0 else "red" for x in all_trades_combined["net_pnl"]],
-                    label='Net PnL per Trade')
-            ax2.set_xlabel("Trade Index")
-            ax2.set_ylabel("Net PnL (₹)")
-            ax2.set_title("Trade-by-Trade Net PnL Contribution")
-            ax2.legend()
-            st.pyplot(fig2)
-        else:
-            st.info("No trades data for waterfall chart.")
-
-        # --- 3. Portfolio Allocation Pie Chart ---
-        st.markdown("### Portfolio Allocation by Final Capital")
-        final_values = [
-            all_trades[s]["capital_after_trade"].iloc[-1] if not all_trades[s].empty else capital_per_stock
-            for s in symbols_list
-        ]
-        fig3 = go.Figure(data=[go.Pie(
-            labels=[s.upper() for s in symbols_list],
-            values=final_values,
-            hole=0.3,
-            textinfo='label+percent+value'
-        )])
-        fig3.update_layout(title="Allocation by Final Capital")
-        st.plotly_chart(fig3)
-
-        # --- 4. Portfolio Drawdown Chart ---
-        st.markdown("### Portfolio Drawdown")
-        portfolio_equity = None
-        for eq in all_equity_curves.values():
-            portfolio_equity = eq if portfolio_equity is None else portfolio_equity.add(eq, fill_value=0)
-        if portfolio_equity is not None and len(portfolio_equity) > 1:
-            drawdowns = (portfolio_equity / portfolio_equity.cummax()) - 1
-            fig4, ax4 = plt.subplots(figsize=(10, 4))
-            drawdowns.plot(ax=ax4, color="red")
-            ax4.set_ylabel("Drawdown")
-            ax4.set_xlabel("Date")
-            ax4.grid(True)
-            st.pyplot(fig4)
-        else:
-            st.info("Not enough data for drawdown chart.")
 
         # --- 5. New: Interactive Normalized Equity Curves Including Portfolio (Plotly) ---
         st.markdown("### Normalized Equity Curves (Interactive) including Portfolio")
