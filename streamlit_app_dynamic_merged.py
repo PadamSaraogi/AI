@@ -404,104 +404,152 @@ with tabs[2]:
     if n_stocks == 0:
         st.warning("Upload data files to compare equity curves.")
     else:
-        st.subheader("All Stocks Equity Curves")
+        st.subheader("Portfolio and Individual Stocks Analysis")
 
-        # Date range filter inputs
-        all_dates = []
+        capital_per_stock = total_portfolio_capital // n_stocks
+        all_trades = {}
+        all_equity_curves = {}
+
+        # Run backtest per stock and collect trades & equity curves
         for symbol in symbols_list:
-            df_signals = stock_data[symbol]['signals']
-            all_dates.extend([df_signals.index.min(), df_signals.index.max()])
-
-        min_date = min(all_dates)
-        max_date = max(all_dates)
-
-        date_filter = st.date_input(
-            "Date Range Filter",
-            value=(min_date, max_date),
-            min_value=min_date,
-            max_value=max_date,
-            help="Filter equity curves by date range"
-        )
-        start_date, end_date = pd.to_datetime(date_filter[0]), pd.to_datetime(date_filter[1])
-
-        fig = go.Figure()
-        perf_summary = []
-
-        for symbol in symbols_list:
-            capital_per_stock = total_portfolio_capital // n_stocks
             trades_df, eq_curve = run_backtest_simulation(
                 stock_data[symbol]['signals'],
                 starting_capital=capital_per_stock,
                 risk_per_trade=risk_per_trade,
             )
-            # Filter equity curve by selected date range
-            eq_curve_filtered = eq_curve[(eq_curve.index >= start_date) & (eq_curve.index <= end_date)]
+            all_trades[symbol] = trades_df
+            all_equity_curves[symbol] = eq_curve
 
-            # Normalize equity curve to start at 100
-            eq_norm = eq_curve_filtered / eq_curve_filtered.iloc[0] * 100
+        # --- 1. Matplotlib: Per-stock equity curves (absolute) ---
+        st.markdown("### Equity Curves per Stock (Absolute Capital)")
+        fig1, ax1 = plt.subplots(figsize=(12, 6))
+        for symbol, eq_curve in all_equity_curves.items():
+            eq_curve.plot(ax=ax1, label=symbol.upper())
+        ax1.set_xlabel("Date")
+        ax1.set_ylabel("Capital (₹)")
+        ax1.set_title("Equity Curves")
+        ax1.legend()
+        ax1.grid(True)
+        st.pyplot(fig1)
 
-            fig.add_trace(go.Scatter(
+        # --- 2. Portfolio Waterfall of Trade PnL ---
+        st.markdown("### Portfolio Trade PnL Waterfall")
+        all_trades_combined = pd.concat(all_trades.values()).sort_values("exit_time")
+        if not all_trades_combined.empty:
+            cum = 0
+            bottoms = []
+            for pnl in all_trades_combined["net_pnl"]:
+                bottoms.append(cum)
+                cum += pnl
+            fig2, ax2 = plt.subplots(figsize=(12, 4))
+            ax2.bar(range(len(all_trades_combined)),
+                    all_trades_combined["net_pnl"],
+                    bottom=bottoms,
+                    color=["green" if x >= 0 else "red" for x in all_trades_combined["net_pnl"]],
+                    label='Net PnL per Trade')
+            ax2.set_xlabel("Trade Index")
+            ax2.set_ylabel("Net PnL (₹)")
+            ax2.set_title("Trade-by-Trade Net PnL Contribution")
+            ax2.legend()
+            st.pyplot(fig2)
+        else:
+            st.info("No trades data for waterfall chart.")
+
+        # --- 3. Portfolio Allocation Pie Chart ---
+        st.markdown("### Portfolio Allocation by Final Capital")
+        final_values = [
+            all_trades[s]["capital_after_trade"].iloc[-1] if not all_trades[s].empty else capital_per_stock
+            for s in symbols_list
+        ]
+        fig3 = go.Figure(data=[go.Pie(
+            labels=[s.upper() for s in symbols_list],
+            values=final_values,
+            hole=0.3,
+            textinfo='label+percent+value'
+        )])
+        fig3.update_layout(title="Allocation by Final Capital")
+        st.plotly_chart(fig3)
+
+        # --- 4. Portfolio Drawdown Chart ---
+        st.markdown("### Portfolio Drawdown")
+        portfolio_equity = None
+        for eq in all_equity_curves.values():
+            portfolio_equity = eq if portfolio_equity is None else portfolio_equity.add(eq, fill_value=0)
+        if portfolio_equity is not None and len(portfolio_equity) > 1:
+            drawdowns = (portfolio_equity / portfolio_equity.cummax()) - 1
+            fig4, ax4 = plt.subplots(figsize=(10, 4))
+            drawdowns.plot(ax=ax4, color="red")
+            ax4.set_ylabel("Drawdown")
+            ax4.set_xlabel("Date")
+            ax4.grid(True)
+            st.pyplot(fig4)
+        else:
+            st.info("Not enough data for drawdown chart.")
+
+        # --- 5. New: Interactive Normalized Equity Curves Including Portfolio (Plotly) ---
+        st.markdown("### Normalized Equity Curves (Interactive) including Portfolio")
+        fig5 = go.Figure()
+
+        for symbol, eq_curve in all_equity_curves.items():
+            eq_norm = eq_curve / eq_curve.iloc[0] * 100
+            fig5.add_trace(go.Scatter(
                 x=eq_norm.index,
                 y=eq_norm.values,
-                mode='lines',
+                mode="lines",
                 name=symbol.upper(),
-                hovertemplate='%{x|%Y-%m-%d}<br>%{y:.2f}',
-                line=dict(width=2)
+                line=dict(width=2),
+                hovertemplate="%{x|%Y-%m-%d %H:%M}<br>%{y:.2f}"
             ))
 
-            # Calculate performance stats
-            total_return_pct = (eq_curve.iloc[-1] / eq_curve.iloc[0] - 1) * 100 if len(eq_curve) > 1 else 0
-            max_dd = ((eq_curve / eq_curve.cummax()) - 1).min() * 100 if len(eq_curve) > 1 else 0
-            daily_rets = eq_curve.pct_change().dropna()
-            sharpe = (daily_rets.mean() / daily_rets.std()) * np.sqrt(252) if daily_rets.std() > 0 else np.nan
+        if portfolio_equity is not None and len(portfolio_equity) > 1:
+            portfolio_equity_norm = portfolio_equity / portfolio_equity.iloc[0] * 100
+            fig5.add_trace(go.Scatter(
+                x=portfolio_equity_norm.index,
+                y=portfolio_equity_norm.values,
+                mode="lines",
+                name="PORTFOLIO",
+                line=dict(width=4, dash='dash', color='black'),
+                hovertemplate="Portfolio<br>%{x|%Y-%m-%d %H:%M}<br>%{y:.2f}"
+            ))
 
-            perf_summary.append({
-                'Symbol': symbol.upper(),
-                'Total Return (%)': f"{total_return_pct:.2f}",
-                'Max Drawdown (%)': f"{max_dd:.2f}",
-                'Sharpe Ratio': f"{sharpe:.2f}",
-            })
-
-        fig.update_layout(
-            title="Normalized Equity Curves",
+        fig5.update_layout(
+            title="Normalized Equity Curves (Including Portfolio)",
             xaxis_title="Date",
             yaxis_title="Normalized Capital (Start = 100)",
             hovermode="x unified",
-            legend_title="Stocks",
+            legend_title="Legend",
             height=600,
-            template="plotly_white"
+            template="plotly_white",
         )
+        st.plotly_chart(fig5, use_container_width=True)
 
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Show performance metrics table
+        # --- 6. New: Per-stock Performance Summary ---
+        perf_summary = []
+        for symbol, eq_curve in all_equity_curves.items():
+            total_return_pct = (eq_curve.iloc[-1] / eq_curve.iloc[0] - 1) * 100 if len(eq_curve) > 1 else 0
+            drawdown_pct = ((eq_curve / eq_curve.cummax()) - 1).min() * 100 if len(eq_curve) > 1 else 0
+            daily_rets = eq_curve.pct_change().dropna()
+            sharpe_ratio = (daily_rets.mean() / daily_rets.std()) * np.sqrt(252) if daily_rets.std() > 0 else np.nan
+            perf_summary.append({
+                "Symbol": symbol.upper(),
+                "Total Return (%)": total_return_pct,
+                "Max Drawdown (%)": drawdown_pct,
+                "Sharpe Ratio": sharpe_ratio,
+            })
         df_perf = pd.DataFrame(perf_summary)
-        st.subheader("Equity Curve Performance Summary")
-        # Convert and format relevant columns as strings with 2 decimals
         for col in ["Total Return (%)", "Max Drawdown (%)", "Sharpe Ratio"]:
             df_perf[col] = df_perf[col].astype(float).map("{:.2f}".format)
-        
+        st.markdown("### Performance Summary")
         st.dataframe(df_perf)
 
-
-        # CSV download of equity data option
-        csv_combined_data = []
-        for symbol in symbols_list:
-            capital_per_stock = total_portfolio_capital // n_stocks
-            _, eq_curve = run_backtest_simulation(
-                stock_data[symbol]['signals'],
-                starting_capital=capital_per_stock,
-                risk_per_trade=risk_per_trade,
-            )
-            tmp_df = pd.DataFrame({symbol.upper(): eq_curve})
-            csv_combined_data.append(tmp_df)
-
-        df_equities = pd.concat(csv_combined_data, axis=1).dropna()
-        csv_data = df_equities.to_csv().encode('utf-8')
-
+        # --- 7. New: Download Combined Equity Curves CSV ---
+        combined_eq_df = pd.concat(all_equity_curves.values(), axis=1)
+        combined_eq_df.columns = [s.upper() for s in all_equity_curves.keys()]
+        combined_eq_df.dropna(how='all', inplace=True)
+        csv_data = combined_eq_df.to_csv().encode('utf-8')
         st.download_button(
-            label="Download Equity Curves Data as CSV",
-            data=csv_data,
-            file_name='equity_curves.csv',
-            mime='text/csv'
+            "Download Combined Equity Curves (CSV)",
+            csv_data,
+            file_name="combined_equity_curves.csv",
+            mime="text/csv"
         )
