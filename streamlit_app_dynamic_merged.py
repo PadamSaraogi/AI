@@ -420,7 +420,6 @@ with tabs[2]:
 
 
         # --- 5. New: Interactive Normalized Equity Curves Including Portfolio (Plotly) ---
-        st.markdown("### Normalized Equity Curves (Interactive) including Portfolio")
         fig5 = go.Figure()
 
         for symbol, eq_curve in all_equity_curves.items():
