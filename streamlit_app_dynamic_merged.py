@@ -151,7 +151,7 @@ with tabs[0]:
                     final_value += trades_df['capital_after_trade'].iloc[-1]  # final symbol value
                 
                 if initial_value > 0:
-                    increase_percent = ((total_net_pnl - total_portfolio_capital) / total_portfolio_capital) * 100
+                    increase_percent = ((total_net_pnl) / total_portfolio_capital) * 100
                 else:
                     increase_percent = 0.0
             else:
