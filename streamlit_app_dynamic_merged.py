@@ -162,7 +162,7 @@ with tabs[0]:
             r2c1, r2c2, r2c3 = st.columns(3)
             
             r1c1.metric("Total Trades", f"{total_trades}")
-            r1c2.metric("Portfolio Value (₹)", f"₹{Total_net_pnl+total_portfolio_capital:,.2f}")
+            r1c2.metric("Portfolio Value (₹)", f"₹{Total_net_pnl:,.2f}")
             r1c3.metric("Returns (%)", f"{increase_percent:.2f}%")    
 
             r2c1.metric("Buy & Hold Returns (%)", f"{buy_and_hold_return*100:.2f}%")
