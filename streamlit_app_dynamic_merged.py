@@ -318,20 +318,36 @@ with tabs[0]:
 
             st.markdown("### Top Contributors to Portfolio PnL")
             
-            # Sum net PnL per stock and as percent of total
-            total_pnl = sum(trades_df['net_pnl'].sum() for trades_df in all_trades.values())
-            contrib = [
-                {
+            # Calculate net PnL sums per stock
+            contrib_list = []
+            total_pnl = 0
+            
+            # Accumulate total PnL first (handle empty DataFrames gracefully)
+            for trades_df in all_trades.values():
+                if trades_df.empty or 'net_pnl' not in trades_df.columns:
+                    continue
+                total_pnl += trades_df['net_pnl'].sum()
+            
+            # Build list of contributions with safe checks
+            for symbol, trades_df in all_trades.items():
+                net_pnl = trades_df['net_pnl'].sum() if not trades_df.empty and 'net_pnl' in trades_df.columns else 0
+                contrib_pct = (net_pnl / total_pnl * 100) if total_pnl != 0 else 0
+                contrib_list.append({
                     'Symbol': symbol.upper(),
-                    'Net PnL': trades_df['net_pnl'].sum(),
-                    'Contribution (%)': 100 * trades_df['net_pnl'].sum() / total_pnl if total_pnl != 0 else 0
-                }
-                for symbol, trades_df in all_trades.items()
-            ]
-            contrib_df = pd.DataFrame(contrib).sort_values('Contribution (%)', ascending=False)
-            contrib_df['Net PnL'] = contrib_df['Net PnL'].map("{:,.2f}".format)
-            contrib_df['Contribution (%)'] = contrib_df['Contribution (%)'].map("{:.2f}".format)
-            st.dataframe(contrib_df)
+                    'Net PnL': net_pnl,
+                    'Contribution (%)': contrib_pct
+                })
+            
+            # Create DataFrame, sort descending by contribution
+            contrib_df = pd.DataFrame(contrib_list).sort_values(by='Contribution (%)', ascending=False).reset_index(drop=True)
+            
+            # Format using .style for better display (if you want Streamlit table formatting support)
+            contrib_df_styled = contrib_df.style.format({
+                'Net PnL': "{:,.2f}",
+                'Contribution (%)': "{:.2f}"
+            }).bar(subset=['Contribution (%)'], color='#85C1E9')  # optional bar for contribution %
+            
+            st.dataframe(contrib_df_styled)
 
 
 # Per Symbol Analysis Tab
