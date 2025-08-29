@@ -521,6 +521,7 @@ with tabs[1]:
         else:
             st.info("No intraday trade data available for selected symbol.")
 
+
 # All Equity Curves Tab
 with tabs[2]:
     if n_stocks == 0:
