@@ -657,18 +657,30 @@ with tabs[2]:
             # Select top 5 winning and losing trades by net_pnl
             top_winning = combined_df.nlargest(5, 'net_pnl').reset_index(drop=True)
             top_losing = combined_df.nsmallest(5, 'net_pnl').reset_index(drop=True)
-        
+                    
             def display_trade_card(trade, is_winner=True):
                 color = '#d4edda' if is_winner else '#f8d7da'  # light green/red background
                 emoji = '🏆' if is_winner else '⚠️'
                 entry_price = trade['entry_price_safe']
                 exit_price = trade['exit_price_safe']
-        
+            
                 entry_price_str = f"₹{entry_price:,.2f}" if pd.notna(entry_price) else "N/A"
                 exit_price_str = f"₹{exit_price:,.2f}" if pd.notna(exit_price) else "N/A"
-        
+            
                 card_html = f"""
-                    <div style="background-color: {color}; padding: 15px; border-radius: 10px; margin: 5px auto; max-width: 320px; text-align: center; box-shadow: 2px 2px 6px rgba(0,0,0,0.1);">
+                    <div style="
+                        background-color: {color};
+                        padding: 15px;
+                        border-radius: 10px;
+                        margin: 5px auto;
+                        width: 320px;
+                        min-height: 220px;
+                        text-align: center;
+                        box-shadow: 2px 2px 6px rgba(0,0,0,0.1);
+                        display: flex;
+                        flex-direction: column;
+                        justify-content: center;
+                    ">
                         <h4>{emoji} {trade['Symbol']} - ₹{trade['net_pnl']:,.2f} {'Profit' if is_winner else 'Loss'}</h4>
                         <p><strong>Entry Time:</strong> {trade['entry_time_fmt']}</p>
                         <p><strong>Exit Time:</strong> {trade['exit_time_fmt']}</p>
