@@ -627,14 +627,12 @@ with tabs[2]:
         if all_trades_combined:
             combined_df = pd.concat(all_trades_combined)
         
-            # Convert time columns
+            # Convert times and filter intraday trades
             combined_df['entry_time'] = pd.to_datetime(combined_df['entry_time'])
             combined_df['exit_time'] = pd.to_datetime(combined_df['exit_time'])
-        
-            # Filter intraday trades
             combined_df = combined_df[combined_df['entry_time'].dt.date == combined_df['exit_time'].dt.date]
         
-            # Safe prices retrieval
+            # Safe price retrieval
             combined_df['entry_price_safe'] = combined_df['entry_price'] if 'entry_price' in combined_df.columns else pd.NA
         
             exit_price = combined_df['exit_price'] if 'exit_price' in combined_df.columns else None
@@ -653,36 +651,9 @@ with tabs[2]:
             combined_df['entry_time_fmt'] = combined_df['entry_time'].dt.strftime('%Y-%m-%d %H:%M')
             combined_df['exit_time_fmt'] = combined_df['exit_time'].dt.strftime('%Y-%m-%d %H:%M')
         
-            # Select top 5 winners and losers
+            # Select top 5 winning and losing trades by net_pnl
             top_winning = combined_df.nlargest(5, 'net_pnl').reset_index(drop=True)
             top_losing = combined_df.nsmallest(5, 'net_pnl').reset_index(drop=True)
-        
-            # CSS styles for flex container and fixed card sizes (responsive)
-            container_style = """
-            <style>
-            .card-container {
-                display: flex;
-                flex-wrap: wrap;
-                justify-content: center;
-                gap: 1rem;
-                padding: 1rem 0;
-            }
-            .card {
-                flex: 1 1 280px;
-                max-width: 320px;
-                min-height: 230px;
-                background-color: #f8f9fa;
-                border-radius: 12px;
-                padding: 16px;
-                box-sizing: border-box;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                text-align: center;
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-            }
-            </style>
-            """
         
             def make_card_html(trade, is_winner=True):
                 bg_color = "#d4edda" if is_winner else "#f8d7da"
@@ -704,10 +675,39 @@ with tabs[2]:
         
             def display_cards(title, df, is_winner):
                 cards_html = "".join(make_card_html(df.iloc[i], is_winner) for i in range(len(df)))
-                st.markdown(f"#### {title}")
-                st.markdown(container_style + f'<div class="card-container">{cards_html}</div>', unsafe_allow_html=True)
+                html = f"""
+                <style>
+                .card-container {{
+                    display: flex;
+                    flex-wrap: wrap;
+                    justify-content: center;
+                    gap: 1rem;
+                    padding: 1rem 0;
+                }}
+                .card {{
+                    flex: 1 1 280px;
+                    max-width: 320px;
+                    min-height: 230px;
+                    background-color: #f8f9fa;
+                    border-radius: 12px;
+                    padding: 16px;
+                    box-sizing: border-box;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                    text-align: center;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                }}
+                </style>
+                <h4>{title}</h4>
+                <div class="card-container">
+                    {cards_html}
+                </div>
+                """
+                st.markdown(html, unsafe_allow_html=True)
         
             display_cards("Top 5 Winning Intraday Trades", top_winning, is_winner=True)
             display_cards("Top 5 Losing Intraday Trades", top_losing, is_winner=False)
+        
         else:
             st.info("No intraday trades data available to display outlier trades.")
