@@ -495,25 +495,6 @@ with tabs[1]:
         
             st.plotly_chart(fig_candle, use_container_width=True)
 
-
-        st.subheader(f"Trade Waterfall Chart ({symbol_select.upper()})")
-        cum = 0
-        bottoms = []
-        for pnl in trades_df["net_pnl"]:
-            bottoms.append(cum)
-            cum += pnl
-        fig_water, ax_water = plt.subplots(figsize=(12, 4))
-        ax_water.bar(
-            range(len(trades_df)),
-            trades_df["net_pnl"],
-            bottom=bottoms,
-            color=["green" if x >= 0 else "red" for x in trades_df["net_pnl"]],
-        )
-        ax_water.set_xlabel("Trade Index")
-        ax_water.set_ylabel("Net PnL (₹)")
-        ax_water.set_title(f"Trade-by-Trade Net PnL Contribution ({symbol_select.upper()})")
-        st.pyplot(fig_water)
-
 # All Equity Curves Tab
 with tabs[2]:
     if n_stocks == 0:
