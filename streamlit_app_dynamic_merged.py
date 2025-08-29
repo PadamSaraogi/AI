@@ -613,7 +613,7 @@ with tabs[2]:
             st.pyplot(fig)
         else:
                 st.info("No trade data for streak analysis.")
-                                
+        
         st.markdown("### Outlier Trades - Top Winning & Losing Intraday Trades")
         
         all_trades_combined = []
@@ -627,15 +627,19 @@ with tabs[2]:
         if all_trades_combined:
             combined_df = pd.concat(all_trades_combined)
         
-            # Convert times and filter intraday trades
+            # Convert time columns
             combined_df['entry_time'] = pd.to_datetime(combined_df['entry_time'])
             combined_df['exit_time'] = pd.to_datetime(combined_df['exit_time'])
+        
+            # Filter intraday trades
             combined_df = combined_df[combined_df['entry_time'].dt.date == combined_df['exit_time'].dt.date]
         
-            # Safe price retrieval
+            # Safe prices retrieval
             combined_df['entry_price_safe'] = combined_df['entry_price'] if 'entry_price' in combined_df.columns else pd.NA
+        
             exit_price = combined_df['exit_price'] if 'exit_price' in combined_df.columns else None
             final_exit_price = combined_df['final_exit_price'] if 'final_exit_price' in combined_df.columns else None
+        
             if exit_price is not None and final_exit_price is not None:
                 combined_df['exit_price_safe'] = exit_price.fillna(final_exit_price)
             elif exit_price is not None:
@@ -645,15 +649,15 @@ with tabs[2]:
             else:
                 combined_df['exit_price_safe'] = pd.NA
         
-            # Format times for display
+            # Format datetime strings
             combined_df['entry_time_fmt'] = combined_df['entry_time'].dt.strftime('%Y-%m-%d %H:%M')
             combined_df['exit_time_fmt'] = combined_df['exit_time'].dt.strftime('%Y-%m-%d %H:%M')
         
-            # Select top 5 winning and losing trades by net_pnl
+            # Select top 5 winners and losers
             top_winning = combined_df.nlargest(5, 'net_pnl').reset_index(drop=True)
             top_losing = combined_df.nsmallest(5, 'net_pnl').reset_index(drop=True)
         
-            # CSS for responsive card container and cards
+            # CSS styles for flex container and fixed card sizes (responsive)
             container_style = """
             <style>
             .card-container {
