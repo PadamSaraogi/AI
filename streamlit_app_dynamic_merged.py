@@ -293,23 +293,24 @@ with tabs[0]:
             else:
                 st.info("Not enough data to display correlation heatmap. Please upload several stocks with sufficient history.")
 
-            # Calculate daily returns matrix and weights
-            returns_matrix = []
+            # Create a DataFrame aligning all daily returns by DateTime index
+            returns_df = pd.DataFrame()
             labels = []
             for symbol, eq_curve in all_equity_curves.items():
                 daily_rets = eq_curve.pct_change().dropna()
-                returns_matrix.append(daily_rets.values)
+                returns_df[symbol.upper()] = daily_rets
                 labels.append(symbol.upper())
-            returns_matrix = np.array(returns_matrix)
             
-            # Portfolio weights (equal if not otherwise specified)
+            # Fill missing values with 0 for covariance calculation
+            returns_df = returns_df.fillna(0)
+            
+            returns_matrix = returns_df.values  # This is now a proper 2D array
+            
             N = len(labels)
             weights = np.ones(N) / N
             
-            if returns_matrix.shape[1] > 1:
-                # Covariance matrix of returns
-                covariance = np.cov(returns_matrix)
-                # Marginal contribution to volatility
+            if returns_matrix.shape[0] > 1 and returns_matrix.shape[1] > 1:
+                covariance = np.cov(returns_matrix, rowvar=False)  # columns are assets
                 port_vol = np.sqrt(weights @ covariance @ weights)
                 mc = (covariance @ weights) / port_vol
                 risk_contrib = weights * mc
@@ -325,7 +326,6 @@ with tabs[0]:
                 st.plotly_chart(fig_pie)
             else:
                 st.info("Not enough data for risk contribution pie chart.")
-                
 # Per Symbol Analysis Tab
 with tabs[1]:
     if n_stocks == 0:
