@@ -254,6 +254,7 @@ with tabs[0]:
             ax_dd.grid(True)
             st.pyplot(fig_dd)
 
+            # Portfolio leaderboard
             summary_data = []
             for symbol in included_symbols:
                 trades_df = all_trades[symbol]
@@ -272,7 +273,9 @@ with tabs[0]:
                     }
                 )
             df_summary = pd.DataFrame(summary_data)
-
+            st.subheader("Portfolio Leaderboard")
+            st.dataframe(df_summary.sort_values("Net PnL", ascending=False))
+            
             st.markdown("### Correlation Heatmap of Daily Returns")
             
             # Ensure all values are finite and matrix isn't empty
