@@ -446,17 +446,6 @@ with tabs[1]:
         else:
             st.info("No intraday trade data available for selected symbol.")
 
-
-        st.subheader(f"{symbol_select.upper()} Drawdown")
-        eq_cumret = equity_curve / equity_curve.iloc[0]
-        drawdowns = eq_cumret / eq_cumret.cummax() - 1
-        fig_dd, ax_dd = plt.subplots(figsize=(10, 4))
-        drawdowns.plot(ax=ax_dd, color="red")
-        ax_dd.set_ylabel("Drawdown")
-        ax_dd.set_xlabel("Date")
-        ax_dd.grid(True)
-        st.pyplot(fig_dd)
-
         st.subheader(f"Candlestick Chart with Trades ({symbol_select.upper()})")
         signals_df = stock_data[symbol_select]['signals']
         
