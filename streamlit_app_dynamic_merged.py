@@ -614,7 +614,7 @@ with tabs[2]:
         else:
                 st.info("No trade data for streak analysis.")
                     
-         st.markdown("### Outlier Trades - Top Winning & Losing Intraday Trades")
+        st.markdown("### Outlier Trades - Top Winning & Losing Intraday Trades")
         
         all_trades_combined = []
         for symbol, trades_df in all_trades.items():
