@@ -316,54 +316,75 @@ with tabs[0]:
             else:
                 st.info("Portfolio equity curve not available for rolling ratios.")
 
-            st.markdown("### Top Contributors to Portfolio PnL")
+            import plotly.express as px
             
-            # Calculate total portfolio PnL
-            total_pnl = 0
-            for trades_df in all_trades.values():
-                if trades_df.empty or 'net_pnl' not in trades_df.columns:
-                    continue
-                total_pnl += trades_df['net_pnl'].sum()
+            st.markdown("### Top Contributors to Portfolio PnL - Interactive Chart & Highlights")
             
+            # Prepare data as before
             contrib_list = []
+            total_pnl = sum(td['net_pnl'].sum() for td in all_trades.values() if not td.empty and 'net_pnl' in td.columns)
+            
             for symbol, trades_df in all_trades.items():
                 net_pnl = trades_df['net_pnl'].sum() if not trades_df.empty and 'net_pnl' in trades_df.columns else 0
                 contrib_pct = (net_pnl / total_pnl * 100) if total_pnl != 0 else 0
                 num_trades = len(trades_df) if not trades_df.empty else 0
-                avg_trade_pnl = net_pnl / num_trades if num_trades > 0 else 0
-            
+                avg_pnl = net_pnl / num_trades if num_trades > 0 else 0
                 contrib_list.append({
                     'Symbol': symbol.upper(),
-                    'Net PnL (₹)': net_pnl,
+                    'Net PnL': net_pnl,
+                    'Contribution (%)': contrib_pct,
                     'Trades': num_trades,
-                    'Avg Trade PnL (₹)': avg_trade_pnl,
-                    'Contribution (%)': contrib_pct
+                    'Avg Trade PnL': avg_pnl
                 })
             
-            contrib_df = pd.DataFrame(contrib_list).sort_values(by='Contribution (%)', ascending=False).reset_index(drop=True)
+            df_contrib = pd.DataFrame(contrib_list)
+            df_contrib.sort_values('Contribution (%)', ascending=True, inplace=True)  # Ascending for horizontal bar
             
-            st.write(f"💼 Total Portfolio PnL: ₹{total_pnl:,.2f}")
-            st.write(f"📊 Number of Stocks: {len(contrib_df)}")
-            st.write(f"📈 Average Contribution per Stock: {contrib_df['Contribution (%)'].mean():.2f}%")
+            # Assign colors based on Net PnL sign
+            df_contrib['Color'] = df_contrib['Net PnL'].apply(lambda x: 'green' if x >= 0 else 'red')
             
-            # Styling function for Net PnL coloring
-            def color_net_pnl(val):
-                color = 'green' if val > 0 else 'red' if val < 0 else 'black'
-                return f'color: {color}'
-            
-            styled_df = (
-                contrib_df.style
-                .format({
-                    'Net PnL (₹)': '₹{:,.2f}',
-                    'Avg Trade PnL (₹)': '₹{:,.2f}',
-                    'Contribution (%)': '{:.2f}%'
-                })
-                .bar(subset=['Contribution (%)'], color='#4287f5')
-                .applymap(color_net_pnl, subset=['Net PnL (₹)'])
-                .set_caption("Stocks ranked by total contribution to portfolio PnL")
+            # 1. Interactive Horizontal Bar Chart
+            fig = px.bar(
+                df_contrib,
+                x='Contribution (%)',
+                y='Symbol',
+                orientation='h',
+                text=df_contrib['Contribution (%)'].map('{:.2f}%'.format),
+                color='Color',
+                color_discrete_map={'green': 'green', 'red': 'red'},
+                hover_data={
+                    'Net PnL': ':.2f',
+                    'Trades': True,
+                    'Avg Trade PnL': ':.2f',
+                    'Color': False
+                }
             )
+            fig.update_traces(textposition='outside')
+            fig.update_layout(
+                showlegend=False,
+                xaxis_title='Contribution (%)',
+                yaxis_title='Stock Symbol',
+                margin=dict(l=0, r=20, t=40, b=40)
+            )
+            st.plotly_chart(fig, use_container_width=True)
             
-            st.dataframe(styled_df)
+            # 2. Highlight Top 5 Contributors with Cards & Progress Bars
+            st.markdown("### Top 5 Contributors Quick Stats")
+            top_n = 5
+            df_top = df_contrib.sort_values('Contribution (%)', ascending=False).head(top_n).reset_index(drop=True)
+            
+            for i in range(top_n):
+                col1, col2 = st.columns([1, 4])
+                with col1:
+                    st.metric(label="Symbol", value=df_top.loc[i, 'Symbol'])
+                with col2:
+                    st.write(f"Contribution: **{df_top.loc[i, 'Contribution (%)']:.2f}%**")
+                    percent = min(max(df_top.loc[i, 'Contribution (%)'], 0), 100)
+                    st.progress(percent / 100)
+                st.write(
+                    f"Net PnL: ₹{df_top.loc[i, 'Net PnL']:.2f} | Trades: {df_top.loc[i, 'Trades']} | "
+                    f"Avg Trade PnL: ₹{df_top.loc[i, 'Avg Trade PnL']:.2f}"
+                )
 
 # Per Symbol Analysis Tab
 with tabs[1]:
