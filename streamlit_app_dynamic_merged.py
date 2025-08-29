@@ -613,9 +613,9 @@ with tabs[2]:
             st.pyplot(fig)
         else:
                 st.info("No trade data for streak analysis.")
-                
-        st.markdown("### Outlier Trades - Top Winning & Losing Trades")
         
+        st.markdown("### Outlier Trades - Top Winning & Losing Trades")
+        # Combine all trades dataframes into one with Symbol column
         all_trades_combined = []
         for symbol, trades_df in all_trades.items():
             if trades_df.empty:
@@ -627,10 +627,23 @@ with tabs[2]:
         if all_trades_combined:
             combined_df = pd.concat(all_trades_combined)
         
-            # Safe column access
-            combined_df['entry_price_safe'] = combined_df.get('entry_price', pd.NA)
-            combined_df['exit_price_safe'] = combined_df.get('exit_price', pd.NA).combine_first(combined_df.get('final_exit_price', pd.NA))
+            # Safe retrieval for 'entry_price'
+            combined_df['entry_price_safe'] = combined_df['entry_price'] if 'entry_price' in combined_df.columns else pd.NA
         
+            # Safe retrieval and merging for 'exit_price'
+            exit_price = combined_df['exit_price'] if 'exit_price' in combined_df.columns else None
+            final_exit_price = combined_df['final_exit_price'] if 'final_exit_price' in combined_df.columns else None
+        
+            if exit_price is not None and final_exit_price is not None:
+                combined_df['exit_price_safe'] = exit_price.fillna(final_exit_price)
+            elif exit_price is not None:
+                combined_df['exit_price_safe'] = exit_price
+            elif final_exit_price is not None:
+                combined_df['exit_price_safe'] = final_exit_price
+            else:
+                combined_df['exit_price_safe'] = pd.NA
+        
+            # Format datetime columns
             combined_df['entry_time_fmt'] = pd.to_datetime(combined_df['entry_time']).dt.strftime('%Y-%m-%d %H:%M')
             combined_df['exit_time_fmt'] = pd.to_datetime(combined_df['exit_time']).dt.strftime('%Y-%m-%d %H:%M')
         
@@ -641,6 +654,11 @@ with tabs[2]:
             def display_trade_card(trade, is_winner=True):
                 color = '#d4edda' if is_winner else '#f8d7da'  # light green/red background
                 emoji = '🏆' if is_winner else '⚠️'
+                entry_price = trade['entry_price_safe']
+                exit_price = trade['exit_price_safe']
+        
+                entry_price_str = f"₹{entry_price:,.2f}" if pd.notna(entry_price) else "N/A"
+                exit_price_str = f"₹{exit_price:,.2f}" if pd.notna(exit_price) else "N/A"
         
                 with st.container():
                     st.markdown(f"""
@@ -648,7 +666,7 @@ with tabs[2]:
                         <h4>{emoji} {trade['Symbol']} - ₹{trade['net_pnl']:,.2f} {'Profit' if is_winner else 'Loss'}</h4>
                         <p><strong>Entry Time:</strong> {trade['entry_time_fmt']}</p>
                         <p><strong>Exit Time:</strong> {trade['exit_time_fmt']}</p>
-                        <p><strong>Entry Price:</strong> ₹{trade['entry_price_safe']:,.2f} | <strong>Exit Price:</strong> ₹{trade['exit_price_safe']:,.2f}</p>
+                        <p><strong>Entry Price:</strong> {entry_price_str} | <strong>Exit Price:</strong> {exit_price_str}</p>
                         <p><strong>Trade PnL:</strong> ₹{trade['net_pnl']:,.2f}</p>
                     </div>
                     """, unsafe_allow_html=True)
@@ -660,5 +678,6 @@ with tabs[2]:
             st.markdown("#### Top 5 Losing Trades")
             for i in range(len(top_losing)):
                 display_trade_card(top_losing.iloc[i], is_winner=False)
+        
         else:
             st.info("No trades data available to display outlier trades.")
