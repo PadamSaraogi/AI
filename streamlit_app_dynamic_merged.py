@@ -613,7 +613,7 @@ with tabs[2]:
             st.pyplot(fig)
         else:
                 st.info("No trade data for streak analysis.")
-                        
+                                
         st.markdown("### Outlier Trades - Top Winning & Losing Intraday Trades")
         
         all_trades_combined = []
@@ -627,20 +627,15 @@ with tabs[2]:
         if all_trades_combined:
             combined_df = pd.concat(all_trades_combined)
         
-            # Convert entry and exit times to datetime
+            # Convert times and filter intraday trades
             combined_df['entry_time'] = pd.to_datetime(combined_df['entry_time'])
             combined_df['exit_time'] = pd.to_datetime(combined_df['exit_time'])
-        
-            # Filter only intraday trades (entry and exit on the same day)
             combined_df = combined_df[combined_df['entry_time'].dt.date == combined_df['exit_time'].dt.date]
         
-            # Safe retrieval for 'entry_price'
+            # Safe price retrieval
             combined_df['entry_price_safe'] = combined_df['entry_price'] if 'entry_price' in combined_df.columns else pd.NA
-        
-            # Safe retrieval and merging for 'exit_price'
             exit_price = combined_df['exit_price'] if 'exit_price' in combined_df.columns else None
             final_exit_price = combined_df['final_exit_price'] if 'final_exit_price' in combined_df.columns else None
-        
             if exit_price is not None and final_exit_price is not None:
                 combined_df['exit_price_safe'] = exit_price.fillna(final_exit_price)
             elif exit_price is not None:
@@ -650,64 +645,65 @@ with tabs[2]:
             else:
                 combined_df['exit_price_safe'] = pd.NA
         
-            # Format datetime columns for display
+            # Format times for display
             combined_df['entry_time_fmt'] = combined_df['entry_time'].dt.strftime('%Y-%m-%d %H:%M')
             combined_df['exit_time_fmt'] = combined_df['exit_time'].dt.strftime('%Y-%m-%d %H:%M')
         
             # Select top 5 winning and losing trades by net_pnl
             top_winning = combined_df.nlargest(5, 'net_pnl').reset_index(drop=True)
             top_losing = combined_df.nsmallest(5, 'net_pnl').reset_index(drop=True)
-                    
-            def display_trade_card(trade, is_winner=True):
-                color = '#d4edda' if is_winner else '#f8d7da'  # light green/red background
-                emoji = '🏆' if is_winner else '⚠️'
+        
+            # CSS for responsive card container and cards
+            container_style = """
+            <style>
+            .card-container {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 1rem;
+                padding: 1rem 0;
+            }
+            .card {
+                flex: 1 1 280px;
+                max-width: 320px;
+                min-height: 230px;
+                background-color: #f8f9fa;
+                border-radius: 12px;
+                padding: 16px;
+                box-sizing: border-box;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                text-align: center;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+            }
+            </style>
+            """
+        
+            def make_card_html(trade, is_winner=True):
+                bg_color = "#d4edda" if is_winner else "#f8d7da"
+                emoji = "🏆" if is_winner else "⚠️"
                 entry_price = trade['entry_price_safe']
                 exit_price = trade['exit_price_safe']
-            
                 entry_price_str = f"₹{entry_price:,.2f}" if pd.notna(entry_price) else "N/A"
                 exit_price_str = f"₹{exit_price:,.2f}" if pd.notna(exit_price) else "N/A"
-            
-                card_html = f"""
-                    <div style="
-                        background-color: {color};
-                        padding: 15px;
-                        border-radius: 10px;
-                        margin: 5px auto;
-                        width: 320px;
-                        min-height: 220px;
-                        text-align: center;
-                        box-shadow: 2px 2px 6px rgba(0,0,0,0.1);
-                        display: flex;
-                        flex-direction: column;
-                        justify-content: center;
-                    ">
-                        <h4>{emoji} {trade['Symbol']} - ₹{trade['net_pnl']:,.2f} {'Profit' if is_winner else 'Loss'}</h4>
-                        <p><strong>Entry Time:</strong> {trade['entry_time_fmt']}</p>
-                        <p><strong>Exit Time:</strong> {trade['exit_time_fmt']}</p>
-                        <p><strong>Entry Price:</strong> {entry_price_str} | <strong>Exit Price:</strong> {exit_price_str}</p>
-                        <p><strong>Trade PnL:</strong> ₹{trade['net_pnl']:,.2f}</p>
-                    </div>
+        
+                return f"""
+                <div class="card" style="background-color: {bg_color};">
+                    <h4>{emoji} {trade['Symbol']} - ₹{trade['net_pnl']:,.2f} {'Profit' if is_winner else 'Loss'}</h4>
+                    <p><strong>Entry Time:</strong> {trade['entry_time_fmt']}</p>
+                    <p><strong>Exit Time:</strong> {trade['exit_time_fmt']}</p>
+                    <p><strong>Entry Price:</strong> {entry_price_str} | <strong>Exit Price:</strong> {exit_price_str}</p>
+                    <p><strong>Trade PnL:</strong> ₹{trade['net_pnl']:,.2f}</p>
+                </div>
                 """
-                st.markdown(card_html, unsafe_allow_html=True)
         
-            def display_cards_in_rows(df, is_winner):
-                # First row: 3 cards, second row: 2 cards
-                cols1 = st.columns([1, 3, 3, 3, 1])  # empty, card, card, card, empty - to center align
-                for i in range(min(3, len(df))):
-                    with cols1[i + 1]:
-                        display_trade_card(df.iloc[i], is_winner)
+            def display_cards(title, df, is_winner):
+                cards_html = "".join(make_card_html(df.iloc[i], is_winner) for i in range(len(df)))
+                st.markdown(f"#### {title}")
+                st.markdown(container_style + f'<div class="card-container">{cards_html}</div>', unsafe_allow_html=True)
         
-                if len(df) > 3:
-                    cols2 = st.columns([1, 3, 3, 1])  # empty, card, card, empty
-                    for j in range(3, min(5, len(df))):
-                        with cols2[j - 2]:
-                            display_trade_card(df.iloc[j], is_winner)
-        
-            st.markdown("#### Top 5 Winning Intraday Trades")
-            display_cards_in_rows(top_winning, is_winner=True)
-        
-            st.markdown("#### Top 5 Losing Intraday Trades")
-            display_cards_in_rows(top_losing, is_winner=False)
-        
+            display_cards("Top 5 Winning Intraday Trades", top_winning, is_winner=True)
+            display_cards("Top 5 Losing Intraday Trades", top_losing, is_winner=False)
         else:
             st.info("No intraday trades data available to display outlier trades.")
