@@ -274,6 +274,20 @@ with tabs[0]:
             st.subheader("Portfolio Leaderboard")
             st.dataframe(df_summary.sort_values("Net PnL", ascending=False))
 
+            # Collect and align daily returns for all stocks
+            returns_df = pd.DataFrame()
+            for symbol, eq_curve in all_equity_curves.items():
+                returns_df[symbol.upper()] = eq_curve.pct_change()
+            
+            # Drop missing values for clean correlation
+            returns_corr = returns_df.corr()
+            
+            st.markdown("### Correlation Heatmap of Daily Returns")
+            fig_corr, ax_corr = plt.subplots(figsize=(8, 6))
+            sns.heatmap(returns_corr, annot=True, cmap="RdBu", center=0, linewidths=.5, fmt=".2f", ax=ax_corr)
+            ax_corr.set_title("Correlation Heatmap (Daily Returns)")
+            st.pyplot(fig_corr)
+
 # Per Symbol Analysis Tab
 with tabs[1]:
     if n_stocks == 0:
