@@ -440,7 +440,7 @@ with tabs[2]:
                 y=portfolio_equity_norm.values,
                 mode="lines",
                 name="PORTFOLIO",
-                line=dict(width=4, dash='dash', color='white'),
+                line=dict(width=2, color='white'),
                 hovertemplate="Portfolio<br>%{x|%Y-%m-%d %H:%M}<br>%{y:.2f}"
             ))
 
