@@ -272,16 +272,7 @@ with tabs[0]:
                     }
                 )
             df_summary = pd.DataFrame(summary_data)
-            st.subheader("Portfolio Leaderboard")
-            st.dataframe(df_summary.sort_values("Net PnL", ascending=False))
 
-            # Collect and align daily returns for all stocks
-            returns_df = pd.DataFrame()
-            for symbol, eq_curve in all_equity_curves.items():
-                returns_df[symbol.upper()] = eq_curve.pct_change()
-            
-            returns_corr = returns_df.corr()
-            
             st.markdown("### Correlation Heatmap of Daily Returns")
             
             # Ensure all values are finite and matrix isn't empty
