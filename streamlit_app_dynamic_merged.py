@@ -279,14 +279,18 @@ with tabs[0]:
             for symbol, eq_curve in all_equity_curves.items():
                 returns_df[symbol.upper()] = eq_curve.pct_change()
             
-            # Drop missing values for clean correlation
             returns_corr = returns_df.corr()
             
             st.markdown("### Correlation Heatmap of Daily Returns")
-            fig_corr, ax_corr = plt.subplots(figsize=(8, 6))
-            sns.heatmap(returns_corr, annot=True, cmap="RdBu", center=0, linewidths=.5, fmt=".2f", ax=ax_corr)
-            ax_corr.set_title("Correlation Heatmap (Daily Returns)")
-            st.pyplot(fig_corr)
+            
+            # Ensure all values are finite and matrix isn't empty
+            if not returns_corr.empty and np.isfinite(returns_corr.values).all():
+                fig_corr, ax_corr = plt.subplots(figsize=(8, 6))
+                sns.heatmap(returns_corr, annot=True, cmap="RdBu", center=0, linewidths=.5, fmt=".2f", ax=ax_corr)
+                ax_corr.set_title("Correlation Heatmap (Daily Returns)")
+                st.pyplot(fig_corr)
+            else:
+                st.info("Not enough data to display correlation heatmap. Please upload several stocks with sufficient history.")
 
 # Per Symbol Analysis Tab
 with tabs[1]:
