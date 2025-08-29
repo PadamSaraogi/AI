@@ -322,7 +322,10 @@ with tabs[0]:
             
             # Prepare data as before
             contrib_list = []
-            total_pnl = sum(td['net_pnl'].sum() for td in all_trades.values() if not td.empty and 'net_pnl' in td.columns)
+            total_pnl = sum(
+                td['net_pnl'].sum() for td in all_trades.values() 
+                if not td.empty and 'net_pnl' in td.columns
+            )
             
             for symbol, trades_df in all_trades.items():
                 net_pnl = trades_df['net_pnl'].sum() if not trades_df.empty and 'net_pnl' in trades_df.columns else 0
@@ -370,21 +373,23 @@ with tabs[0]:
             
             # 2. Highlight Top 5 Contributors with Cards & Progress Bars
             st.markdown("### Top 5 Contributors Quick Stats")
-            top_n = 5
+            top_n = min(5, len(df_contrib))
             df_top = df_contrib.sort_values('Contribution (%)', ascending=False).head(top_n).reset_index(drop=True)
             
             for i in range(top_n):
                 col1, col2 = st.columns([1, 4])
                 with col1:
-                    st.metric(label="Symbol", value=df_top.loc[i, 'Symbol'])
+                    st.metric(label="Symbol", value=df_top.iloc[i]['Symbol'])
                 with col2:
-                    st.write(f"Contribution: **{df_top.loc[i, 'Contribution (%)']:.2f}%**")
-                    percent = min(max(df_top.loc[i, 'Contribution (%)'], 0), 100)
+                    contribution = df_top.iloc[i]['Contribution (%)']
+                    st.write(f"Contribution: **{contribution:.2f}%**")
+                    percent = max(min(contribution, 100), 0)  # Clamp between 0 and 100
                     st.progress(percent / 100)
                 st.write(
-                    f"Net PnL: ₹{df_top.loc[i, 'Net PnL']:.2f} | Trades: {df_top.loc[i, 'Trades']} | "
-                    f"Avg Trade PnL: ₹{df_top.loc[i, 'Avg Trade PnL']:.2f}"
+                    f"Net PnL: ₹{df_top.iloc[i]['Net PnL']:.2f} | Trades: {df_top.iloc[i]['Trades']} | "
+                    f"Avg Trade PnL: ₹{df_top.iloc[i]['Avg Trade PnL']:.2f}"
                 )
+
 
 # Per Symbol Analysis Tab
 with tabs[1]:
