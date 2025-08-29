@@ -318,37 +318,52 @@ with tabs[0]:
 
             st.markdown("### Top Contributors to Portfolio PnL")
             
-            # Calculate net PnL sums per stock
-            contrib_list = []
+            # Calculate total portfolio PnL
             total_pnl = 0
-            
-            # Accumulate total PnL first (handle empty DataFrames gracefully)
             for trades_df in all_trades.values():
                 if trades_df.empty or 'net_pnl' not in trades_df.columns:
                     continue
                 total_pnl += trades_df['net_pnl'].sum()
             
-            # Build list of contributions with safe checks
+            contrib_list = []
             for symbol, trades_df in all_trades.items():
                 net_pnl = trades_df['net_pnl'].sum() if not trades_df.empty and 'net_pnl' in trades_df.columns else 0
                 contrib_pct = (net_pnl / total_pnl * 100) if total_pnl != 0 else 0
+                num_trades = len(trades_df) if not trades_df.empty else 0
+                avg_trade_pnl = net_pnl / num_trades if num_trades > 0 else 0
+            
                 contrib_list.append({
                     'Symbol': symbol.upper(),
-                    'Net PnL': net_pnl,
+                    'Net PnL (₹)': net_pnl,
+                    'Trades': num_trades,
+                    'Avg Trade PnL (₹)': avg_trade_pnl,
                     'Contribution (%)': contrib_pct
                 })
             
-            # Create DataFrame, sort descending by contribution
             contrib_df = pd.DataFrame(contrib_list).sort_values(by='Contribution (%)', ascending=False).reset_index(drop=True)
             
-            # Format using .style for better display (if you want Streamlit table formatting support)
-            contrib_df_styled = contrib_df.style.format({
-                'Net PnL': "{:,.2f}",
-                'Contribution (%)': "{:.2f}"
-            }).bar(subset=['Contribution (%)'], color='#85C1E9')  # optional bar for contribution %
+            st.write(f"💼 Total Portfolio PnL: ₹{total_pnl:,.2f}")
+            st.write(f"📊 Number of Stocks: {len(contrib_df)}")
+            st.write(f"📈 Average Contribution per Stock: {contrib_df['Contribution (%)'].mean():.2f}%")
             
-            st.dataframe(contrib_df_styled)
-
+            # Styling function for Net PnL coloring
+            def color_net_pnl(val):
+                color = 'green' if val > 0 else 'red' if val < 0 else 'black'
+                return f'color: {color}'
+            
+            styled_df = (
+                contrib_df.style
+                .format({
+                    'Net PnL (₹)': '₹{:,.2f}',
+                    'Avg Trade PnL (₹)': '₹{:,.2f}',
+                    'Contribution (%)': '{:.2f}%'
+                })
+                .bar(subset=['Contribution (%)'], color='#4287f5')
+                .applymap(color_net_pnl, subset=['Net PnL (₹)'])
+                .set_caption("Stocks ranked by total contribution to portfolio PnL")
+            )
+            
+            st.dataframe(styled_df)
 
 # Per Symbol Analysis Tab
 with tabs[1]:
