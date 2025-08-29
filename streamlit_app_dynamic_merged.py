@@ -613,10 +613,9 @@ with tabs[2]:
             st.pyplot(fig)
         else:
                 st.info("No trade data for streak analysis.")
+                
+        st.markdown("### Outlier Trades - Top Winning & Losing Trades")
         
-        st.markdown("### Outlier Trades Table - Top 5 Winning & Losing Trades Across All Stocks")
-        
-        # Combine all trades dataframes into one with symbolic stock reference
         all_trades_combined = []
         for symbol, trades_df in all_trades.items():
             if trades_df.empty:
@@ -628,39 +627,38 @@ with tabs[2]:
         if all_trades_combined:
             combined_df = pd.concat(all_trades_combined)
         
-            # Use .get to safely retrieve columns or fallback to NaN
+            # Safe column access
             combined_df['entry_price_safe'] = combined_df.get('entry_price', pd.NA)
-            combined_df['exit_price_safe'] = combined_df.get('exit_price', pd.NA)
-            combined_df['exit_price_safe'] = combined_df['exit_price_safe'].fillna(combined_df.get('final_exit_price', pd.NA))
+            combined_df['exit_price_safe'] = combined_df.get('exit_price', pd.NA).combine_first(combined_df.get('final_exit_price', pd.NA))
         
-            # Sort for top 5 winning and losing trades by net_pnl
-            top_winning = combined_df.nlargest(5, 'net_pnl')
-            top_losing = combined_df.nsmallest(5, 'net_pnl')
+            combined_df['entry_time_fmt'] = pd.to_datetime(combined_df['entry_time']).dt.strftime('%Y-%m-%d %H:%M')
+            combined_df['exit_time_fmt'] = pd.to_datetime(combined_df['exit_time']).dt.strftime('%Y-%m-%d %H:%M')
         
-            # Concatenate and create a label column
-            outliers_df = pd.concat([
-                top_winning.assign(Trade_Type='Top Winning'),
-                top_losing.assign(Trade_Type='Top Losing')
-            ])
+            # Top 5 winning and losing trades
+            top_winning = combined_df.nlargest(5, 'net_pnl').reset_index(drop=True)
+            top_losing = combined_df.nsmallest(5, 'net_pnl').reset_index(drop=True)
         
-            # Select relevant columns to show
-            display_cols = ['Symbol', 'entry_time', 'exit_time', 'entry_price_safe', 'exit_price_safe', 'net_pnl', 'Trade_Type']
+            def display_trade_card(trade, is_winner=True):
+                color = '#d4edda' if is_winner else '#f8d7da'  # light green/red background
+                emoji = '🏆' if is_winner else '⚠️'
         
-            # Format datetime and numeric columns
-            outliers_df['entry_time'] = pd.to_datetime(outliers_df['entry_time']).dt.strftime('%Y-%m-%d %H:%M')
-            outliers_df['exit_time'] = pd.to_datetime(outliers_df['exit_time']).dt.strftime('%Y-%m-%d %H:%M')
-            outliers_df['net_pnl'] = outliers_df['net_pnl'].map('₹{:,.2f}'.format)
-            outliers_df['entry_price_safe'] = outliers_df['entry_price_safe'].map(lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A")
-            outliers_df['exit_price_safe'] = outliers_df['exit_price_safe'].map(lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A")
+                with st.container():
+                    st.markdown(f"""
+                    <div style="background-color: {color}; padding: 15px; border-radius: 10px; margin-bottom: 10px;">
+                        <h4>{emoji} {trade['Symbol']} - ₹{trade['net_pnl']:,.2f} {'Profit' if is_winner else 'Loss'}</h4>
+                        <p><strong>Entry Time:</strong> {trade['entry_time_fmt']}</p>
+                        <p><strong>Exit Time:</strong> {trade['exit_time_fmt']}</p>
+                        <p><strong>Entry Price:</strong> ₹{trade['entry_price_safe']:,.2f} | <strong>Exit Price:</strong> ₹{trade['exit_price_safe']:,.2f}</p>
+                        <p><strong>Trade PnL:</strong> ₹{trade['net_pnl']:,.2f}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
         
-            st.dataframe(outliers_df[display_cols].rename(columns={
-                'entry_price_safe': 'Entry Price',
-                'exit_price_safe': 'Exit Price',
-                'net_pnl': 'Net PnL',
-                'entry_time': 'Entry Time',
-                'exit_time': 'Exit Time',
-                'Trade_Type': 'Trade Type'
-            }).reset_index(drop=True))
+            st.markdown("#### Top 5 Winning Trades")
+            for i in range(len(top_winning)):
+                display_trade_card(top_winning.iloc[i], is_winner=True)
+        
+            st.markdown("#### Top 5 Losing Trades")
+            for i in range(len(top_losing)):
+                display_trade_card(top_losing.iloc[i], is_winner=False)
         else:
             st.info("No trades data available to display outlier trades.")
-            
