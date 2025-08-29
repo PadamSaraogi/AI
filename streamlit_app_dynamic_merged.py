@@ -613,7 +613,7 @@ with tabs[2]:
             st.pyplot(fig)
         else:
                 st.info("No trade data for streak analysis.")
-
+        
         st.markdown("### Outlier Trades Table - Top 5 Winning & Losing Trades Across All Stocks")
         
         # Combine all trades dataframes into one with symbolic stock reference
@@ -627,7 +627,12 @@ with tabs[2]:
         
         if all_trades_combined:
             combined_df = pd.concat(all_trades_combined)
-            
+        
+            # Use .get to safely retrieve columns or fallback to NaN
+            combined_df['entry_price_safe'] = combined_df.get('entry_price', pd.NA)
+            combined_df['exit_price_safe'] = combined_df.get('exit_price', pd.NA)
+            combined_df['exit_price_safe'] = combined_df['exit_price_safe'].fillna(combined_df.get('final_exit_price', pd.NA))
+        
             # Sort for top 5 winning and losing trades by net_pnl
             top_winning = combined_df.nlargest(5, 'net_pnl')
             top_losing = combined_df.nsmallest(5, 'net_pnl')
@@ -639,16 +644,23 @@ with tabs[2]:
             ])
         
             # Select relevant columns to show
-            display_cols = ['Symbol', 'entry_time', 'exit_time', 'entry_price', 'exit_price', 'net_pnl', 'Trade_Type']
+            display_cols = ['Symbol', 'entry_time', 'exit_time', 'entry_price_safe', 'exit_price_safe', 'net_pnl', 'Trade_Type']
+        
             # Format datetime and numeric columns
             outliers_df['entry_time'] = pd.to_datetime(outliers_df['entry_time']).dt.strftime('%Y-%m-%d %H:%M')
             outliers_df['exit_time'] = pd.to_datetime(outliers_df['exit_time']).dt.strftime('%Y-%m-%d %H:%M')
             outliers_df['net_pnl'] = outliers_df['net_pnl'].map('₹{:,.2f}'.format)
-            outliers_df['entry_price'] = outliers_df['entry_price'].map('₹{:,.2f}'.format)
-            outliers_df['exit_price'] = outliers_df['exit_price'].map('₹{:,.2f}'.format)
+            outliers_df['entry_price_safe'] = outliers_df['entry_price_safe'].map(lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A")
+            outliers_df['exit_price_safe'] = outliers_df['exit_price_safe'].map(lambda x: f"₹{x:,.2f}" if pd.notna(x) else "N/A")
         
-            st.dataframe(outliers_df[display_cols].reset_index(drop=True))
+            st.dataframe(outliers_df[display_cols].rename(columns={
+                'entry_price_safe': 'Entry Price',
+                'exit_price_safe': 'Exit Price',
+                'net_pnl': 'Net PnL',
+                'entry_time': 'Entry Time',
+                'exit_time': 'Exit Time',
+                'Trade_Type': 'Trade Type'
+            }).reset_index(drop=True))
         else:
             st.info("No trades data available to display outlier trades.")
-        
             
