@@ -4,7 +4,6 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
-pip install seaborn --user
 from backtest import run_backtest_simulation
 
 st.set_page_config(layout="wide")
