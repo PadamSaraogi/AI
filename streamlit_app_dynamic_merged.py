@@ -613,6 +613,42 @@ with tabs[2]:
             st.pyplot(fig)
         else:
                 st.info("No trade data for streak analysis.")
+
+        st.markdown("### Outlier Trades Table - Top 5 Winning & Losing Trades Across All Stocks")
         
+        # Combine all trades dataframes into one with symbolic stock reference
+        all_trades_combined = []
+        for symbol, trades_df in all_trades.items():
+            if trades_df.empty:
+                continue
+            temp_df = trades_df.copy()
+            temp_df['Symbol'] = symbol.upper()
+            all_trades_combined.append(temp_df)
+        
+        if all_trades_combined:
+            combined_df = pd.concat(all_trades_combined)
+            
+            # Sort for top 5 winning and losing trades by net_pnl
+            top_winning = combined_df.nlargest(5, 'net_pnl')
+            top_losing = combined_df.nsmallest(5, 'net_pnl')
+        
+            # Concatenate and create a label column
+            outliers_df = pd.concat([
+                top_winning.assign(Trade_Type='Top Winning'),
+                top_losing.assign(Trade_Type='Top Losing')
+            ])
+        
+            # Select relevant columns to show
+            display_cols = ['Symbol', 'entry_time', 'exit_time', 'entry_price', 'exit_price', 'net_pnl', 'Trade_Type']
+            # Format datetime and numeric columns
+            outliers_df['entry_time'] = pd.to_datetime(outliers_df['entry_time']).dt.strftime('%Y-%m-%d %H:%M')
+            outliers_df['exit_time'] = pd.to_datetime(outliers_df['exit_time']).dt.strftime('%Y-%m-%d %H:%M')
+            outliers_df['net_pnl'] = outliers_df['net_pnl'].map('₹{:,.2f}'.format)
+            outliers_df['entry_price'] = outliers_df['entry_price'].map('₹{:,.2f}'.format)
+            outliers_df['exit_price'] = outliers_df['exit_price'].map('₹{:,.2f}'.format)
+        
+            st.dataframe(outliers_df[display_cols].reset_index(drop=True))
+        else:
+            st.info("No trades data available to display outlier trades.")
         
             
