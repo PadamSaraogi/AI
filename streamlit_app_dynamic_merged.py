@@ -613,7 +613,7 @@ with tabs[2]:
             st.pyplot(fig)
         else:
                 st.info("No trade data for streak analysis.")
-        
+                
         st.markdown("### Outlier Trades - Top Winning & Losing Intraday Trades")
         
         all_trades_combined = []
@@ -627,14 +627,17 @@ with tabs[2]:
         if all_trades_combined:
             combined_df = pd.concat(all_trades_combined)
         
-            # Convert times and filter intraday trades
+            # Convert to datetime
             combined_df['entry_time'] = pd.to_datetime(combined_df['entry_time'])
             combined_df['exit_time'] = pd.to_datetime(combined_df['exit_time'])
+        
+            # Filter intraday trades only
             combined_df = combined_df[combined_df['entry_time'].dt.date == combined_df['exit_time'].dt.date]
         
-            # Safe price retrieval
+            # Safe retrieval of entry price
             combined_df['entry_price_safe'] = combined_df['entry_price'] if 'entry_price' in combined_df.columns else pd.NA
         
+            # Safe retrieval of exit price with fallback
             exit_price = combined_df['exit_price'] if 'exit_price' in combined_df.columns else None
             final_exit_price = combined_df['final_exit_price'] if 'final_exit_price' in combined_df.columns else None
         
@@ -647,16 +650,66 @@ with tabs[2]:
             else:
                 combined_df['exit_price_safe'] = pd.NA
         
-            # Format datetime strings
+            # Format datetime strings for display
             combined_df['entry_time_fmt'] = combined_df['entry_time'].dt.strftime('%Y-%m-%d %H:%M')
             combined_df['exit_time_fmt'] = combined_df['exit_time'].dt.strftime('%Y-%m-%d %H:%M')
         
-            # Select top 5 winning and losing trades by net_pnl
+            # Select top 5 winning and 5 losing trades
             top_winning = combined_df.nlargest(5, 'net_pnl').reset_index(drop=True)
             top_losing = combined_df.nsmallest(5, 'net_pnl').reset_index(drop=True)
         
+            # CSS and HTML generation for neon cards with responsive flexbox container
+            container_style = """
+            <style>
+            .card-container {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 1rem;
+                padding: 1rem 0;
+            }
+            .card {
+                flex: 1 1 280px;
+                max-width: 320px;
+                min-height: 230px;
+                border-radius: 12px;
+                padding: 20px;
+                box-sizing: border-box;
+                color: black;
+                font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+                text-align: center;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                box-shadow: 0 0 5px #39ff14, 0 0 10px #39ff14, 0 0 20px #39ff14;
+                transition: box-shadow 0.3s ease;
+            }
+            .card.loser {
+                box-shadow: 0 0 5px #ff073a, 0 0 10px #ff073a, 0 0 20px #ff073a;
+            }
+            .card:hover {
+                box-shadow: 0 0 10px #00ff00, 0 0 20px #00ff00, 0 0 40px #00ff00;
+            }
+            .card.loser:hover {
+                box-shadow: 0 0 10px #ff1744, 0 0 20px #ff1744, 0 0 40px #ff1744;
+            }
+            .card h4 {
+                margin-bottom: 15px;
+                font-weight: 700;
+                font-size: 1.25rem;
+                text-shadow: 0 0 5px rgba(0,0,0,0.3);
+            }
+            .card p {
+                margin: 5px 0;
+                font-size: 0.95rem;
+                font-weight: 600;
+                text-shadow: 0 0 3px rgba(0,0,0,0.2);
+            }
+            </style>
+            """
+        
             def make_card_html(trade, is_winner=True):
-                bg_color_class = "card" if is_winner else "card loser"
+                card_class = "card" if is_winner else "card loser"
                 emoji = "🏆" if is_winner else "⚠️"
                 entry_price = trade['entry_price_safe']
                 exit_price = trade['exit_price_safe']
@@ -664,72 +717,19 @@ with tabs[2]:
                 exit_price_str = f"₹{exit_price:,.2f}" if pd.notna(exit_price) else "N/A"
         
                 return f"""
-                    <div class="{bg_color_class}">
-                        <h4>{emoji} {trade['Symbol']} - ₹{trade['net_pnl']:,.2f} {'Profit' if is_winner else 'Loss'}</h4>
-                        <p><strong>Entry Time:</strong> {trade['entry_time_fmt']}</p>
-                        <p><strong>Exit Time:</strong> {trade['exit_time_fmt']}</p>
-                        <p><strong>Entry Price:</strong> {entry_price_str} | <strong>Exit Price:</strong> {exit_price_str}</p>
-                        <p><strong>Trade PnL:</strong> ₹{trade['net_pnl']:,.2f}</p>
-                    </div>
+                <div class="{card_class}">
+                    <h4>{emoji} {trade['Symbol']} - ₹{trade['net_pnl']:,.2f} {'Profit' if is_winner else 'Loss'}</h4>
+                    <p><strong>Entry Time:</strong> {trade['entry_time_fmt']}</p>
+                    <p><strong>Exit Time:</strong> {trade['exit_time_fmt']}</p>
+                    <p><strong>Entry Price:</strong> {entry_price_str} | <strong>Exit Price:</strong> {exit_price_str}</p>
+                    <p><strong>Trade PnL:</strong> ₹{trade['net_pnl']:,.2f}</p>
+                </div>
                 """
         
             def display_cards(title, df, is_winner):
                 cards_html = "".join(make_card_html(df.iloc[i], is_winner) for i in range(len(df)))
-                html = f"""
-                <style>
-                .card-container {{
-                    display: flex;
-                    flex-wrap: wrap;
-                    justify-content: center;
-                    gap: 1rem;
-                    padding: 1rem 0;
-                }}
-                .card {{
-                    flex: 1 1 280px;
-                    max-width: 320px;
-                    min-height: 230px;
-                    background-color: {'#39ff14' if is_winner else '#ff073a'};  /* Neon green / Neon red */
-                    border-radius: 12px;
-                    padding: 20px;
-                    box-sizing: border-box;
-                    box-shadow:
-                      0 0 5px #39ff14,  /* Neon glow for winners */
-                      0 0 10px #39ff14,
-                      0 0 20px #39ff14;
-                    color: black;
-                    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-                    text-align: center;
-                    display: flex;
-                    flex-direction: column;
-                    justify-content: center;
-                }}
-                .card.loser {{
-                    box-shadow:
-                      0 0 5px #ff073a,  /* Neon glow for losers */
-                      0 0 10px #ff073a,
-                      0 0 20px #ff073a;
-                    color: black;
-                }}
-                .card h4 {{
-                    margin-bottom: 15px;
-                    font-weight: 700;
-                    font-size: 1.25rem;
-                    text-shadow: 0 0 3px rgba(0,0,0,0.5);
-                }}
-                .card p {{
-                    margin: 5px 0;
-                    font-size: 0.95rem;
-                    font-weight: 600;
-                    text-shadow: 0 0 2px rgba(0,0,0,0.4);
-                }}
-                </style>
-                <h4>{title}</h4>
-                <div class="card-container">
-                    {cards_html}
-                </div>
-                """
+                html = f"{container_style}<h4>{title}</h4><div class='card-container'>{cards_html}</div>"
                 st.markdown(html, unsafe_allow_html=True)
-
         
             display_cards("Top 5 Winning Intraday Trades", top_winning, is_winner=True)
             display_cards("Top 5 Losing Intraday Trades", top_losing, is_winner=False)
