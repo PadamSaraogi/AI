@@ -613,9 +613,9 @@ with tabs[2]:
             st.pyplot(fig)
         else:
                 st.info("No trade data for streak analysis.")
-        
+                
         st.markdown("### Outlier Trades - Top Winning & Losing Trades")
-        # Combine all trades dataframes into one with Symbol column
+        
         all_trades_combined = []
         for symbol, trades_df in all_trades.items():
             if trades_df.empty:
@@ -660,24 +660,39 @@ with tabs[2]:
                 entry_price_str = f"₹{entry_price:,.2f}" if pd.notna(entry_price) else "N/A"
                 exit_price_str = f"₹{exit_price:,.2f}" if pd.notna(exit_price) else "N/A"
         
-                with st.container():
-                    st.markdown(f"""
-                    <div style="background-color: {color}; padding: 15px; border-radius: 10px; margin-bottom: 10px;">
+                card_html = f"""
+                    <div style="background-color: {color}; padding: 15px; border-radius: 10px; margin: 5px auto; max-width: 320px; text-align: center; box-shadow: 2px 2px 6px rgba(0,0,0,0.1);">
                         <h4>{emoji} {trade['Symbol']} - ₹{trade['net_pnl']:,.2f} {'Profit' if is_winner else 'Loss'}</h4>
                         <p><strong>Entry Time:</strong> {trade['entry_time_fmt']}</p>
                         <p><strong>Exit Time:</strong> {trade['exit_time_fmt']}</p>
                         <p><strong>Entry Price:</strong> {entry_price_str} | <strong>Exit Price:</strong> {exit_price_str}</p>
                         <p><strong>Trade PnL:</strong> ₹{trade['net_pnl']:,.2f}</p>
                     </div>
-                    """, unsafe_allow_html=True)
+                """
+                st.markdown(card_html, unsafe_allow_html=True)
+        
+            def display_cards_in_rows(df, is_winner):
+                # First row: 3 cards, second row: 2 cards
+                # Use st.columns and center align cards by adding empty columns on sides if needed
+        
+                # Row 1 - first 3 cards
+                cols1 = st.columns([1, 3, 3, 3, 1])  # empty, card, card, card, empty for centering
+                for i in range(min(3, len(df))):
+                    with cols1[i+1]:
+                        display_trade_card(df.iloc[i], is_winner)
+        
+                # Row 2 - next 2 cards
+                if len(df) > 3:
+                    cols2 = st.columns([1, 3, 3, 1])  # empty, card, card, empty
+                    for j in range(3, min(5, len(df))):
+                        with cols2[j - 2]:
+                            display_trade_card(df.iloc[j], is_winner)
         
             st.markdown("#### Top 5 Winning Trades")
-            for i in range(len(top_winning)):
-                display_trade_card(top_winning.iloc[i], is_winner=True)
+            display_cards_in_rows(top_winning, is_winner=True)
         
             st.markdown("#### Top 5 Losing Trades")
-            for i in range(len(top_losing)):
-                display_trade_card(top_losing.iloc[i], is_winner=False)
+            display_cards_in_rows(top_losing, is_winner=False)
         
         else:
             st.info("No trades data available to display outlier trades.")
