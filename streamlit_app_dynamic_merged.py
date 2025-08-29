@@ -552,37 +552,6 @@ with tabs[2]:
         )
         st.plotly_chart(fig5, use_container_width=True)
 
-        # --- 6. New: Per-stock Performance Summary ---
-        perf_summary = []
-        for symbol, eq_curve in all_equity_curves.items():
-            total_return_pct = (eq_curve.iloc[-1] / eq_curve.iloc[0] - 1) * 100 if len(eq_curve) > 1 else 0
-            drawdown_pct = ((eq_curve / eq_curve.cummax()) - 1).min() * 100 if len(eq_curve) > 1 else 0
-            daily_rets = eq_curve.pct_change().dropna()
-            sharpe_ratio = (daily_rets.mean() / daily_rets.std()) * np.sqrt(252) if daily_rets.std() > 0 else np.nan
-            perf_summary.append({
-                "Symbol": symbol.upper(),
-                "Total Return (%)": total_return_pct,
-                "Max Drawdown (%)": drawdown_pct,
-                "Sharpe Ratio": sharpe_ratio,
-            })
-        df_perf = pd.DataFrame(perf_summary)
-        for col in ["Total Return (%)", "Max Drawdown (%)", "Sharpe Ratio"]:
-            df_perf[col] = df_perf[col].astype(float).map("{:.2f}".format)
-        st.markdown("### Performance Summary")
-        st.dataframe(df_perf)
-
-        # --- 7. New: Download Combined Equity Curves CSV ---
-        combined_eq_df = pd.concat(all_equity_curves.values(), axis=1)
-        combined_eq_df.columns = [s.upper() for s in all_equity_curves.keys()]
-        combined_eq_df.dropna(how='all', inplace=True)
-        csv_data = combined_eq_df.to_csv().encode('utf-8')
-        st.download_button(
-            "Download Combined Equity Curves (CSV)",
-            csv_data,
-            file_name="combined_equity_curves.csv",
-            mime="text/csv"
-        )
-
         perf_summary = []
         for symbol, eq_curve in all_equity_curves.items():
             total_return_pct = (eq_curve.iloc[-1] / eq_curve.iloc[0] - 1) * 100 if len(eq_curve) > 1 else 0
