@@ -459,7 +459,8 @@ with tabs[1]:
 
         st.subheader(f"Candlestick Chart with Trades ({symbol_select.upper()})")
         signals_df = stock_data[symbol_select]['signals']
-        if {'open','high','low','close'}.issubset(signals_df.columns):
+        
+        if {'open', 'high', 'low', 'close'}.issubset(signals_df.columns):
             fig_candle = go.Figure(data=[go.Candlestick(
                 x=signals_df.index,
                 open=signals_df['open'],
@@ -467,6 +468,7 @@ with tabs[1]:
                 low=signals_df['low'],
                 close=signals_df['close']
             )])
+        
             fig_candle.add_trace(go.Scatter(
                 x=trades_df['entry_time'],
                 y=trades_df['entry_price'],
@@ -474,6 +476,7 @@ with tabs[1]:
                 marker=dict(symbol='triangle-up', color='green', size=9),
                 name='Buy Entry'
             ))
+        
             fig_candle.add_trace(go.Scatter(
                 x=trades_df['exit_time'],
                 y=trades_df['final_exit_price'],
@@ -481,8 +484,17 @@ with tabs[1]:
                 marker=dict(symbol='triangle-down', color='red', size=9),
                 name='Exit'
             ))
-            fig_candle.update_layout(title=f"{symbol_select.upper()} Price & Trades", xaxis_title="Date", yaxis_title="Price")
-            st.plotly_chart(fig_candle)
+        
+            fig_candle.update_layout(
+                title=f"{symbol_select.upper()} Price & Trades",
+                xaxis_title="Date",
+                yaxis_title="Price",
+                autosize=True,
+                margin=dict(l=0, r=0, t=30, b=0)
+            )
+        
+            st.plotly_chart(fig_candle, use_container_width=True)
+
 
         st.subheader(f"Trade Waterfall Chart ({symbol_select.upper()})")
         cum = 0
