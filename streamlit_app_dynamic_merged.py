@@ -420,32 +420,6 @@ with tabs[1]:
         ax.grid(True)
         st.pyplot(fig_eq)
 
-        # Convert to datetime if needed
-        trades_df['entry_time'] = pd.to_datetime(trades_df['entry_time'])
-        trades_df['exit_time'] = pd.to_datetime(trades_df['exit_time'])
-        
-        # Filter for intraday trades only (start and end on same day)
-        intraday_trades_df = trades_df[
-            trades_df['entry_time'].dt.date == trades_df['exit_time'].dt.date
-        ].copy()
-
-        st.write(f"Number of intraday trades: {len(intraday_trades_df)}")
-
-        if not intraday_trades_df.empty:
-            st.subheader(f"Intraday Trades for {symbol_select.upper()}")
-            st.dataframe(intraday_trades_df.sort_values('exit_time').reset_index(drop=True))
-            
-            # Optional CSV download
-            csv_download = intraday_trades_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                f"Download {symbol_select.upper()} Intraday Trades as CSV",
-                csv_download,
-                file_name=f"{symbol_select}_intraday_trades.csv",
-                mime="text/csv"
-            )
-        else:
-            st.info("No intraday trade data available for selected symbol.")
-
         st.subheader(f"Candlestick Chart with Trades ({symbol_select.upper()})")
         signals_df = stock_data[symbol_select]['signals']
         
