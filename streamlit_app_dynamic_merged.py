@@ -663,32 +663,22 @@ with tabs[2]:
                 font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
             }
             .card {
-                flex: 1 1 280px;
-                max-width: 320px;
-                min-height: 230px;
-                border-radius: 12px;
-                padding: 20px;
-                box-sizing: border-box;
+                box-shadow: 0 0 3px #28a428, 0 0 6px #28a428, 0 0 10px #28a428;
+                background-color: #2a5d2a;  /* darker neon green background */
                 color: white;
-                text-align: center;
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-                box-shadow: 0 0 5px #39ff14, 0 0 10px #39ff14, 0 0 20px #39ff14;
-                transition: box-shadow 0.3s ease;
-                background-color: #39ff14;
-                margin-bottom: 1rem;
             }
             .card.loser {
-                box-shadow: 0 0 5px #ff073a, 0 0 10px #ff073a, 0 0 20px #ff073a;
-                background-color: #ff073a;
+                box-shadow: 0 0 3px #bb2a2a, 0 0 6px #bb2a2a, 0 0 10px #bb2a2a;
+                background-color: #5d2a2a;  /* darker neon red background */
+                color: white;
             }
             .card:hover {
-                box-shadow: 0 0 10px #00ff00, 0 0 20px #00ff00, 0 0 40px #00ff00;
+                box-shadow: 0 0 8px #4caf50, 0 0 16px #4caf50, 0 0 32px #4caf50;
             }
             .card.loser:hover {
-                box-shadow: 0 0 10px #ff1744, 0 0 20px #ff1744, 0 0 40px #ff1744;
+                box-shadow: 0 0 8px #e53935, 0 0 16px #e53935, 0 0 32px #e53935;
             }
+
             .card h4 {
                 margin-bottom: 15px;
                 font-weight: 700;
