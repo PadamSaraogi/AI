@@ -293,39 +293,29 @@ with tabs[0]:
             else:
                 st.info("Not enough data to display correlation heatmap. Please upload several stocks with sufficient history.")
 
-            # Create a DataFrame aligning all daily returns by DateTime index
-            returns_df = pd.DataFrame()
-            labels = []
-            for symbol, eq_curve in all_equity_curves.items():
-                daily_rets = eq_curve.pct_change().dropna()
-                returns_df[symbol.upper()] = daily_rets
-                labels.append(symbol.upper())
+            window = 21  # About a month
+            risk_free = 0  # Change if you'd like
             
-            # Fill missing values with 0 for covariance calculation
-            returns_df = returns_df.fillna(0)
+            if portfolio_equity is not None:
+                rets = portfolio_equity.pct_change().dropna()
+                rolling_sharpe = rets.rolling(window).mean() / rets.rolling(window).std() * np.sqrt(252)
+                rolling_downside = rets.where(rets < 0, 0)
+                rolling_sortino = rets.rolling(window).mean() / rolling_downside.rolling(window).std() * np.sqrt(252)
             
-            returns_matrix = returns_df.values  # This is now a proper 2D array
-            
-            N = len(labels)
-            weights = np.ones(N) / N
-            
-            if returns_matrix.shape[0] > 1 and returns_matrix.shape[1] > 1:
-                covariance = np.cov(returns_matrix, rowvar=False)  # columns are assets
-                port_vol = np.sqrt(weights @ covariance @ weights)
-                mc = (covariance @ weights) / port_vol
-                risk_contrib = weights * mc
-                risk_pct = risk_contrib / risk_contrib.sum() * 100
-            
-                fig_pie = go.Figure(data=[go.Pie(
-                    labels=labels,
-                    values=risk_pct,
-                    hole=0.3,
-                    textinfo='label+percent+value'
-                )])
-                fig_pie.update_layout(title="Risk Contribution Pie (Share of Portfolio Volatility)")
-                st.plotly_chart(fig_pie)
+                st.markdown("### Rolling Sharpe & Sortino Ratios (Portfolio)")
+                fig, ax = plt.subplots(figsize=(12, 5))
+                rolling_sharpe.plot(ax=ax, label='Sharpe Ratio')
+                rolling_sortino.plot(ax=ax, label='Sortino Ratio')
+                ax.axhline(0, color='black', linewidth=0.7, linestyle='--')
+                ax.set_ylabel("Ratio (annualized)")
+                ax.set_xlabel("Date")
+                ax.legend()
+                ax.set_title(f"Rolling {window}-Day Portfolio Sharpe/Sortino")
+                ax.grid(True)
+                st.pyplot(fig)
             else:
-                st.info("Not enough data for risk contribution pie chart.")
+                st.info("Portfolio equity curve not available for rolling ratios.")
+
 # Per Symbol Analysis Tab
 with tabs[1]:
     if n_stocks == 0:
