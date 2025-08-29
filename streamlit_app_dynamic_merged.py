@@ -273,8 +273,6 @@ with tabs[0]:
                     }
                 )
             df_summary = pd.DataFrame(summary_data)
-            st.subheader("Portfolio Leaderboard")
-            st.dataframe(df_summary.sort_values("Net PnL", ascending=False))
                         
             # Collect and align daily returns for all stocks
             returns_df = pd.DataFrame()
