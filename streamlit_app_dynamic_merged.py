@@ -613,8 +613,8 @@ with tabs[2]:
             st.pyplot(fig)
         else:
                 st.info("No trade data for streak analysis.")
-                
-        st.markdown("### Outlier Trades - Top Winning & Losing Trades")
+                        
+        st.markdown("### Outlier Trades - Top Winning & Losing Intraday Trades")
         
         all_trades_combined = []
         for symbol, trades_df in all_trades.items():
@@ -626,6 +626,13 @@ with tabs[2]:
         
         if all_trades_combined:
             combined_df = pd.concat(all_trades_combined)
+        
+            # Convert entry and exit times to datetime
+            combined_df['entry_time'] = pd.to_datetime(combined_df['entry_time'])
+            combined_df['exit_time'] = pd.to_datetime(combined_df['exit_time'])
+        
+            # Filter only intraday trades (entry and exit on the same day)
+            combined_df = combined_df[combined_df['entry_time'].dt.date == combined_df['exit_time'].dt.date]
         
             # Safe retrieval for 'entry_price'
             combined_df['entry_price_safe'] = combined_df['entry_price'] if 'entry_price' in combined_df.columns else pd.NA
@@ -643,11 +650,11 @@ with tabs[2]:
             else:
                 combined_df['exit_price_safe'] = pd.NA
         
-            # Format datetime columns
-            combined_df['entry_time_fmt'] = pd.to_datetime(combined_df['entry_time']).dt.strftime('%Y-%m-%d %H:%M')
-            combined_df['exit_time_fmt'] = pd.to_datetime(combined_df['exit_time']).dt.strftime('%Y-%m-%d %H:%M')
+            # Format datetime columns for display
+            combined_df['entry_time_fmt'] = combined_df['entry_time'].dt.strftime('%Y-%m-%d %H:%M')
+            combined_df['exit_time_fmt'] = combined_df['exit_time'].dt.strftime('%Y-%m-%d %H:%M')
         
-            # Top 5 winning and losing trades
+            # Select top 5 winning and losing trades by net_pnl
             top_winning = combined_df.nlargest(5, 'net_pnl').reset_index(drop=True)
             top_losing = combined_df.nsmallest(5, 'net_pnl').reset_index(drop=True)
         
@@ -673,26 +680,22 @@ with tabs[2]:
         
             def display_cards_in_rows(df, is_winner):
                 # First row: 3 cards, second row: 2 cards
-                # Use st.columns and center align cards by adding empty columns on sides if needed
-        
-                # Row 1 - first 3 cards
-                cols1 = st.columns([1, 3, 3, 3, 1])  # empty, card, card, card, empty for centering
+                cols1 = st.columns([1, 3, 3, 3, 1])  # empty, card, card, card, empty - to center align
                 for i in range(min(3, len(df))):
-                    with cols1[i+1]:
+                    with cols1[i + 1]:
                         display_trade_card(df.iloc[i], is_winner)
         
-                # Row 2 - next 2 cards
                 if len(df) > 3:
                     cols2 = st.columns([1, 3, 3, 1])  # empty, card, card, empty
                     for j in range(3, min(5, len(df))):
                         with cols2[j - 2]:
                             display_trade_card(df.iloc[j], is_winner)
         
-            st.markdown("#### Top 5 Winning Trades")
+            st.markdown("#### Top 5 Winning Intraday Trades")
             display_cards_in_rows(top_winning, is_winner=True)
         
-            st.markdown("#### Top 5 Losing Trades")
+            st.markdown("#### Top 5 Losing Intraday Trades")
             display_cards_in_rows(top_losing, is_winner=False)
         
         else:
-            st.info("No trades data available to display outlier trades.")
+            st.info("No intraday trades data available to display outlier trades.")
