@@ -316,6 +316,24 @@ with tabs[0]:
             else:
                 st.info("Portfolio equity curve not available for rolling ratios.")
 
+            st.markdown("### Top Contributors to Portfolio PnL")
+            
+            # Sum net PnL per stock and as percent of total
+            total_pnl = sum(trades_df['net_pnl'].sum() for trades_df in all_trades.values())
+            contrib = [
+                {
+                    'Symbol': symbol.upper(),
+                    'Net PnL': trades_df['net_pnl'].sum(),
+                    'Contribution (%)': 100 * trades_df['net_pnl'].sum() / total_pnl if total_pnl != 0 else 0
+                }
+                for symbol, trades_df in all_trades.items()
+            ]
+            contrib_df = pd.DataFrame(contrib).sort_values('Contribution (%)', ascending=False)
+            contrib_df['Net PnL'] = contrib_df['Net PnL'].map("{:,.2f}".format)
+            contrib_df['Contribution (%)'] = contrib_df['Contribution (%)'].map("{:.2f}".format)
+            st.dataframe(contrib_df)
+
+
 # Per Symbol Analysis Tab
 with tabs[1]:
     if n_stocks == 0:
