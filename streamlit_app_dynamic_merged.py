@@ -514,19 +514,6 @@ with tabs[1]:
         ax_water.set_title(f"Trade-by-Trade Net PnL Contribution ({symbol_select.upper()})")
         st.pyplot(fig_water)
 
-        if not trades_df.empty:
-            st.subheader(f"All Trades for {symbol_select.upper()}")
-            st.dataframe(trades_df.sort_values("exit_time").reset_index(drop=True))
-            csv_download = trades_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                f"Download {symbol_select.upper()} Trades as CSV",
-                csv_download,
-                file_name=f"{symbol_select}_trades.csv",
-                mime="text/csv"
-            )
-        else:
-            st.info("No trade data available for selected symbol.")
-
 # All Equity Curves Tab
 with tabs[2]:
     if n_stocks == 0:
