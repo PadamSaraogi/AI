@@ -613,7 +613,7 @@ with tabs[2]:
             st.pyplot(fig)
         else:
                 st.info("No trade data for streak analysis.")
-                    
+        
         st.markdown("### Outlier Trades - Top Winning & Losing Intraday Trades")
         
         all_trades_combined = []
@@ -632,6 +632,7 @@ with tabs[2]:
             combined_df = combined_df[combined_df['entry_time'].dt.date == combined_df['exit_time'].dt.date]
         
             combined_df['entry_price_safe'] = combined_df['entry_price'] if 'entry_price' in combined_df.columns else pd.NA
+        
             exit_price = combined_df['exit_price'] if 'exit_price' in combined_df.columns else None
             final_exit_price = combined_df['final_exit_price'] if 'final_exit_price' in combined_df.columns else None
         
@@ -650,7 +651,7 @@ with tabs[2]:
             top_winning = combined_df.nlargest(5, 'net_pnl').reset_index(drop=True)
             top_losing = combined_df.nsmallest(5, 'net_pnl').reset_index(drop=True)
         
-            container_style = """
+            css = """
             <style>
             .card-container {
                 display: flex;
@@ -658,6 +659,7 @@ with tabs[2]:
                 justify-content: center;
                 gap: 1rem;
                 padding: 1rem 0;
+                font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
             }
             .card {
                 flex: 1 1 280px;
@@ -667,16 +669,18 @@ with tabs[2]:
                 padding: 20px;
                 box-sizing: border-box;
                 color: white;
-                font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
                 text-align: center;
                 display: flex;
                 flex-direction: column;
                 justify-content: center;
                 box-shadow: 0 0 5px #39ff14, 0 0 10px #39ff14, 0 0 20px #39ff14;
                 transition: box-shadow 0.3s ease;
+                background-color: #39ff14;
+                margin-bottom: 1rem;
             }
             .card.loser {
                 box-shadow: 0 0 5px #ff073a, 0 0 10px #ff073a, 0 0 20px #ff073a;
+                background-color: #ff073a;
             }
             .card:hover {
                 box-shadow: 0 0 10px #00ff00, 0 0 20px #00ff00, 0 0 40px #00ff00;
@@ -702,28 +706,34 @@ with tabs[2]:
             def make_card_html(trade, is_winner=True):
                 card_class = "card" if is_winner else "card loser"
                 emoji = "🏆" if is_winner else "⚠️"
-                entry_price = trade['entry_price_safe']
-                exit_price = trade['exit_price_safe']
-                entry_price_str = f"₹{entry_price:,.2f}" if pd.notna(entry_price) else "N/A"
-                exit_price_str = f"₹{exit_price:,.2f}" if pd.notna(exit_price) else "N/A"
+                ep = trade['entry_price_safe']
+                xp = trade['exit_price_safe']
+                ep_str = f"₹{ep:,.2f}" if pd.notna(ep) else "N/A"
+                xp_str = f"₹{xp:,.2f}" if pd.notna(xp) else "N/A"
         
                 return f"""
                 <div class="{card_class}">
                     <h4>{emoji} {trade['Symbol']} - ₹{trade['net_pnl']:,.2f} {'Profit' if is_winner else 'Loss'}</h4>
                     <p><strong>Entry Time:</strong> {trade['entry_time_fmt']}</p>
                     <p><strong>Exit Time:</strong> {trade['exit_time_fmt']}</p>
-                    <p><strong>Entry Price:</strong> {entry_price_str} | <strong>Exit Price:</strong> {exit_price_str}</p>
+                    <p><strong>Entry Price:</strong> {ep_str} | <strong>Exit Price:</strong> {xp_str}</p>
                     <p><strong>Trade PnL:</strong> ₹{trade['net_pnl']:,.2f}</p>
                 </div>
                 """
         
-            def display_cards(title, df, is_winner):
+            def render_cards(title, df, is_winner):
                 cards_html = "".join(make_card_html(df.iloc[i], is_winner) for i in range(len(df)))
-                html = f"{container_style}<h4>{title}</h4><div class='card-container'>{cards_html}</div>"
-                st.markdown(html, unsafe_allow_html=True)
+                full_html = f"""
+                {css}
+                <h4>{title}</h4>
+                <div class='card-container'>
+                    {cards_html}
+                </div>
+                """
+                components.html(full_html, height=700)
         
-            display_cards("Top 5 Winning Intraday Trades", top_winning, is_winner=True)
-            display_cards("Top 5 Losing Intraday Trades", top_losing, is_winner=False)
+            render_cards("Top 5 Winning Intraday Trades", top_winning, True)
+            render_cards("Top 5 Losing Intraday Trades", top_losing, False)
         
         else:
             st.info("No intraday trades data available to display outlier trades.")
