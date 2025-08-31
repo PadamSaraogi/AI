@@ -21,6 +21,13 @@ tabs = st.tabs([
 ])
 
 with tabs[0]:
+
+    st.markdown("""
+        <div style='display: flex; align-items: center;'>
+          <img src='https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/React-icon.svg/512px-React-icon.svg.png' width='60'>
+          <h1 style='margin-left: 18px;'>Multi-Stock Trading Dashboard</h1>
+        </div>
+        """, unsafe_allow_html=True)
     # Sidebar: Upload and Inputs
     st.sidebar.header("Upload Data Files")
     signal_files = st.sidebar.file_uploader(
