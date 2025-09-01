@@ -752,6 +752,7 @@ with tab2:
     api_key = st.text_input("BreezeConnect API Key", type="password")
     api_secret = st.text_input("BreezeConnect API Secret", type="password")
     session_token = st.text_input("BreezeConnect Session Token", type="password")
+    exchange_code = st.text_input("Exchange Code (e.g. NSE)")
     stock_code = st.text_input("Stock Code (e.g. RELIANCE)")
 
     connect_pressed = st.button("Connect and Subscribe")
@@ -766,7 +767,7 @@ with tab2:
                     breeze.generate_session(api_secret=api_secret, session_token=session_token)
                     breeze.ws_connect()
                     breeze.subscribe_feeds(
-                        exchange_code="NSE",
+                        exchange_code=exchange_code,
                         stock_code=stock_code,
                         product_type="cash"
                     )
