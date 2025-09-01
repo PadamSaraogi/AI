@@ -753,10 +753,35 @@ def setup_breeze(api_key, api_secret, session_token):
     breeze.generate_session(api_secret=api_secret, session_token=session_token)
     return breeze
 
-def on_ticks(ticks):
-    # ticks is a list of price dicts received from BreezeConnect websocket
-    # Extract relevant info and append to session_state DataFrame
+def calculate_indicators_live(df):
+    if df.empty or len(df) < 20:
+        return df  # Not enough data to calculate indicators
     
+    df = df.set_index("timestamp")
+
+    df['ema_20'] = ta.trend.ema_indicator(df['last_traded_price'], window=20)
+    df['ema_50'] = ta.trend.ema_indicator(df['last_traded_price'], window=50)
+
+    df['ATR'] = ta.volatility.average_true_range(high=df['last_traded_price'],
+                                                 low=df['last_traded_price'],
+                                                 close=df['last_traded_price'],
+                                                 window=14)
+    df['RSI'] = ta.momentum.rsi(df['last_traded_price'], window=14)
+
+    df = df.reset_index()
+    return df
+
+def predict_signal(model, df):
+    FEATURES = ['ema_20', 'ema_50', 'ATR', 'RSI']  # Adjust features based on your model
+    latest_data = df.dropna(subset=FEATURES).iloc[-1:]
+    if latest_data.empty:
+        return None, None
+    X = latest_data[FEATURES]
+    pred = model.predict(X)[0]
+    proba = model.predict_proba(X).max()
+    return pred, proba
+
+def on_ticks(ticks):
     if "live_data" not in st.session_state:
         st.session_state.live_data = pd.DataFrame()
 
@@ -770,15 +795,16 @@ def on_ticks(ticks):
         new_rows.append(row)
 
     new_df = pd.DataFrame(new_rows)
-    # Append new rows to live_data DataFrame
     st.session_state.live_data = pd.concat([st.session_state.live_data, new_df], ignore_index=True)
 
-    # Keep only the most recent MAX_WINDOW_SIZE rows
+    # Keep only recent ticks limited to MAX_WINDOW_SIZE
     if len(st.session_state.live_data) > MAX_WINDOW_SIZE:
         st.session_state.live_data = st.session_state.live_data.iloc[-MAX_WINDOW_SIZE:].reset_index(drop=True)
 
-# Live Trading tab code
-tab2, = st.tabs(["Live Trading"])
+    st.session_state.live_data = calculate_indicators_live(st.session_state.live_data)
+
+# Initialize tabs
+tab1, tab2 = st.tabs(["Backtesting", "Live Trading"])
 
 with tab2:
     st.header("Live Trading Dashboard")
@@ -789,11 +815,15 @@ with tab2:
     exchange_code = st.text_input("Exchange Code (e.g. NSE)")
     stock_code = st.text_input("Stock Code (e.g. RELIANCE)")
 
+    uploaded_model_file = st.file_uploader("Upload trained ML model (.pkl)", type=["pkl"])
+
     connect_pressed = st.button("Connect and Subscribe")
 
     if connect_pressed:
         if not all([api_key, api_secret, session_token, exchange_code, stock_code]):
-            st.error("Please fill all fields.")
+            st.error("Please fill all credential and stock fields.")
+        elif uploaded_model_file is None:
+            st.error("Please upload your trained model file (.pkl).")
         else:
             if "breeze" not in st.session_state:
                 try:
@@ -805,14 +835,30 @@ with tab2:
                     breeze.on_ticks = on_ticks
                     st.session_state.breeze = breeze
                     st.success(f"Subscribed to {exchange_code}:{stock_code} live feed.")
-                except Exception as e:
-                    st.error(f"Connection error: {e}")
 
-    # Show the latest price and recent live ticks if available
+                    # Load the uploaded model file from BytesIO without saving locally
+                    model_bytes = uploaded_model_file.read()
+                    model = joblib.load(io.BytesIO(model_bytes))
+                    st.session_state.model = model
+                    st.success("ML model loaded successfully.")
+
+                except Exception as e:
+                    st.error(f"Connection or model loading error: {e}")
+
+    # Display live data and ML signal
     if "live_data" in st.session_state and not st.session_state.live_data.empty:
         latest_price = st.session_state.live_data["last_traded_price"].iloc[-1]
         st.metric(f"{exchange_code.upper()} {stock_code.upper()} Live Price", latest_price)
-        st.subheader("Latest Live Ticks")
+
+        st.subheader("Latest Live Data with Indicators")
         st.dataframe(st.session_state.live_data.tail(10))
+
+        if "model" in st.session_state:
+            pred, conf = predict_signal(st.session_state.model, st.session_state.live_data)
+            if pred is not None:
+                signal_map = {1: "Buy", -1: "Sell", 0: "Hold"}
+                st.metric("ML Signal", signal_map.get(pred, "Unknown"), delta=f"Confidence: {conf:.2f}")
+            else:
+                st.info("Waiting for enough data to generate signal.")
     else:
-        st.info("Enter credentials and hit Connect to start receiving live data.")
+        st.info("Enter credentials, upload model, and hit Connect to start receiving live data.")
