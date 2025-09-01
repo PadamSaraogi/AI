@@ -744,4 +744,51 @@ with tab1:
             
             else:
                 st.info("No intraday trades data available to display outlier trades.")
+
+with tab2:
+    st.header("Live Trading Dashboard")
+
+    # User inputs for credentials and stock
+    api_key = st.text_input("BreezeConnect API Key", type="password")
+    api_secret = st.text_input("BreezeConnect API Secret", type="password")
+    session_token = st.text_input("BreezeConnect Session Token", type="password")
+    exchange_code = st.text_input("Exchange Code (e.g. NSE)")
+    stock_code = st.text_input("Stock Code (e.g. RELIANCE)")
+
+    connect_pressed = st.button("Connect and Subscribe")
+
+    if connect_pressed:
+        if not all([api_key, api_secret, session_token, exchange_code, stock_code]):
+            st.error("Please enter all required fields above.")
+        else:
+            if "breeze" not in st.session_state:
+                try:
+                    breeze = BreezeConnect(api_key=api_key)
+                    breeze.generate_session(api_secret=api_secret, session_token=session_token)
+                    breeze.ws_connect()
+                    breeze.subscribe_feeds(
+                        exchange_code=exchange_code,
+                        stock_code=stock_code,
+                        product_type="cash"
+                    )
+
+                    # Callback to handle live tick updates
+                    def on_ticks(ticks):
+                        st.session_state['live_ticks'] = ticks
+
+                    breeze.on_ticks = on_ticks
+
+                    # Store for subsequent use
+                    st.session_state.breeze = breeze
+                    st.success(f"Subscribed to {exchange_code}:{stock_code} live feed.")
+                except Exception as e:
+                    st.error(f"Error connecting: {e}")
+
+    # Show latest price if available
+    if "live_ticks" in st.session_state and st.session_state['live_ticks']:
+        last_tick = st.session_state['live_ticks'][-1]
+        live_price = last_tick.get("last_traded_price", "N/A")
+        st.metric(f"{exchange_code.upper()} {stock_code.upper()} Live Price", live_price)
+    else:
+        st.info("Enter credentials and press Connect to start streaming live data.")
             
