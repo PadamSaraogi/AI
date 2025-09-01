@@ -6,6 +6,7 @@ import streamlit.components.v1 as components
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from backtest import run_backtest_simulation
+from breeze_connect import BreezeConnect
 
 st.set_page_config(layout="wide")
 st.markdown("""
