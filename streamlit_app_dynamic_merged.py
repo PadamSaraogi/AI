@@ -746,10 +746,43 @@ with tab1:
             else:
                 st.info("No intraday trades data available to display outlier trades.")
 
+MAX_WINDOW_SIZE = 150  # Number of latest ticks to keep
+
+def setup_breeze(api_key, api_secret, session_token):
+    breeze = BreezeConnect(api_key=api_key)
+    breeze.generate_session(api_secret=api_secret, session_token=session_token)
+    return breeze
+
+def on_ticks(ticks):
+    # ticks is a list of price dicts received from BreezeConnect websocket
+    # Extract relevant info and append to session_state DataFrame
+    
+    if "live_data" not in st.session_state:
+        st.session_state.live_data = pd.DataFrame()
+
+    new_rows = []
+    for tick in ticks:
+        row = {
+            "timestamp": pd.to_datetime(tick["timestamp"], unit='ms', utc=True),
+            "last_traded_price": tick.get("last_traded_price", float('nan')),
+            "volume": tick.get("volume", float('nan')),
+        }
+        new_rows.append(row)
+
+    new_df = pd.DataFrame(new_rows)
+    # Append new rows to live_data DataFrame
+    st.session_state.live_data = pd.concat([st.session_state.live_data, new_df], ignore_index=True)
+
+    # Keep only the most recent MAX_WINDOW_SIZE rows
+    if len(st.session_state.live_data) > MAX_WINDOW_SIZE:
+        st.session_state.live_data = st.session_state.live_data.iloc[-MAX_WINDOW_SIZE:].reset_index(drop=True)
+
+# Live Trading tab code
+tab2, = st.tabs(["Live Trading"])
+
 with tab2:
     st.header("Live Trading Dashboard")
 
-    # User inputs for credentials and stock
     api_key = st.text_input("BreezeConnect API Key", type="password")
     api_secret = st.text_input("BreezeConnect API Secret", type="password")
     session_token = st.text_input("BreezeConnect Session Token", type="password")
@@ -760,36 +793,26 @@ with tab2:
 
     if connect_pressed:
         if not all([api_key, api_secret, session_token, exchange_code, stock_code]):
-            st.error("Please enter all required fields above.")
+            st.error("Please fill all fields.")
         else:
             if "breeze" not in st.session_state:
                 try:
-                    breeze = BreezeConnect(api_key=api_key)
-                    breeze.generate_session(api_secret=api_secret, session_token=session_token)
+                    breeze = setup_breeze(api_key, api_secret, session_token)
                     breeze.ws_connect()
-                    breeze.subscribe_feeds(
-                        exchange_code=exchange_code,
-                        stock_code=stock_code,
-                        product_type="cash"
-                    )
-
-                    # Callback to handle live tick updates
-                    def on_ticks(ticks):
-                        st.session_state['live_ticks'] = ticks
-
+                    breeze.subscribe_feeds(exchange_code=exchange_code,
+                                           stock_code=stock_code,
+                                           product_type="cash")
                     breeze.on_ticks = on_ticks
-
-                    # Store for subsequent use
                     st.session_state.breeze = breeze
                     st.success(f"Subscribed to {exchange_code}:{stock_code} live feed.")
                 except Exception as e:
-                    st.error(f"Error connecting: {e}")
+                    st.error(f"Connection error: {e}")
 
-    # Show latest price if available
-    if "live_ticks" in st.session_state and st.session_state['live_ticks']:
-        last_tick = st.session_state['live_ticks'][-1]
-        live_price = last_tick.get("last_traded_price", "N/A")
-        st.metric(f"{exchange_code.upper()} {stock_code.upper()} Live Price", live_price)
+    # Show the latest price and recent live ticks if available
+    if "live_data" in st.session_state and not st.session_state.live_data.empty:
+        latest_price = st.session_state.live_data["last_traded_price"].iloc[-1]
+        st.metric(f"{exchange_code.upper()} {stock_code.upper()} Live Price", latest_price)
+        st.subheader("Latest Live Ticks")
+        st.dataframe(st.session_state.live_data.tail(10))
     else:
-        st.info("Enter credentials and press Connect to start streaming live data.")
-            
+        st.info("Enter credentials and hit Connect to start receiving live data.")
