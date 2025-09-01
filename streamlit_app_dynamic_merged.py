@@ -747,6 +747,16 @@ with tab1:
                 st.info("No intraday trades data available to display outlier trades.")
 
 MAX_WINDOW_SIZE = 150  # Number of latest ticks to keep
+MIN_UPDATE_INTERVAL = 60  # seconds, throttle live data processing to once per minute
+
+# Setup logger for live trading events
+logger = logging.getLogger("LiveTradingLogger")
+logger.setLevel(logging.INFO)
+if not logger.hasHandlers():
+    handler = logging.FileHandler("live_trading.log")
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 def setup_breeze(api_key, api_secret, session_token):
     breeze = BreezeConnect(api_key=api_key)
@@ -772,7 +782,7 @@ def calculate_indicators_live(df):
     return df
 
 def predict_signal(model, df):
-    FEATURES = ['ema_20', 'ema_50', 'ATR', 'RSI']  # Adjust features based on your model
+    FEATURES = ['ema_20', 'ema_50', 'ATR', 'RSI']
     latest_data = df.dropna(subset=FEATURES).iloc[-1:]
     if latest_data.empty:
         return None, None
@@ -781,27 +791,84 @@ def predict_signal(model, df):
     proba = model.predict_proba(X).max()
     return pred, proba
 
+def initialize_trade_state():
+    if "position" not in st.session_state:
+        st.session_state.position = None
+    if "trades" not in st.session_state:
+        st.session_state.trades = []
+    if "equity_curve" not in st.session_state:
+        st.session_state.equity_curve = []
+
+def update_trades(signal, price, timestamp):
+    pos = st.session_state.position
+    if signal == 1 and pos is None:
+        # Open new position
+        st.session_state.position = {"entry_price": price, "entry_time": timestamp}
+        logger.info(f"Opened new position at price {price} on {timestamp}")
+    elif signal == -1 and pos is not None:
+        # Close position
+        pnl = price - pos["entry_price"]
+        trade_record = {
+            "entry_price": pos["entry_price"],
+            "exit_price": price,
+            "entry_time": pos["entry_time"],
+            "exit_time": timestamp,
+            "pnl": pnl,
+        }
+        st.session_state.trades.append(trade_record)
+        st.session_state.position = None
+        logger.info(f"Closed position at price {price} on {timestamp} with PnL {pnl:.2f}")
+
+    # Update equity curve
+    total_pnl = sum(t['pnl'] for t in st.session_state.trades)
+    if pos is not None:
+        total_pnl += (price - pos["entry_price"])
+    st.session_state.equity_curve.append({"timestamp": timestamp, "total_pnl": total_pnl})
+
 def on_ticks(ticks):
+    current_time = time.time()
+    if "last_calc_time" not in st.session_state:
+        st.session_state.last_calc_time = 0
+
+    # Throttle processing to once per minute
+    if current_time - st.session_state.last_calc_time < MIN_UPDATE_INTERVAL:
+        return
+    st.session_state.last_calc_time = current_time
+
     if "live_data" not in st.session_state:
         st.session_state.live_data = pd.DataFrame()
+    initialize_trade_state()
 
     new_rows = []
     for tick in ticks:
+        # Parse timestamp; BreezeConnect timestamps are in ms UTC
         row = {
             "timestamp": pd.to_datetime(tick["timestamp"], unit='ms', utc=True),
             "last_traded_price": tick.get("last_traded_price", float('nan')),
             "volume": tick.get("volume", float('nan')),
         }
         new_rows.append(row)
-
     new_df = pd.DataFrame(new_rows)
     st.session_state.live_data = pd.concat([st.session_state.live_data, new_df], ignore_index=True)
 
-    # Keep only recent ticks limited to MAX_WINDOW_SIZE
+    # Keep only the most recent MAX_WINDOW_SIZE rows
     if len(st.session_state.live_data) > MAX_WINDOW_SIZE:
         st.session_state.live_data = st.session_state.live_data.iloc[-MAX_WINDOW_SIZE:].reset_index(drop=True)
 
+    # Calculate Indicators
     st.session_state.live_data = calculate_indicators_live(st.session_state.live_data)
+
+    # Predict signal if model is loaded
+    if "model" in st.session_state:
+        pred, conf = predict_signal(st.session_state.model, st.session_state.live_data)
+        if pred is not None:
+            signal_map = {1: "Buy", -1: "Sell", 0: "Hold"}
+            signal_str = signal_map.get(pred, "Unknown")
+            logger.info(f"ML Signal: {signal_str} with confidence {conf:.2f}")
+            # Update trades based on signal and latest price/timestamp
+            latest_price = st.session_state.live_data["last_traded_price"].iloc[-1]
+            latest_timestamp = st.session_state.live_data["timestamp"].iloc[-1]
+            update_trades(pred, latest_price, latest_timestamp)
 
 # Initialize tabs
 tab1, tab2 = st.tabs(["Backtesting", "Live Trading"])
@@ -836,7 +903,7 @@ with tab2:
                     st.session_state.breeze = breeze
                     st.success(f"Subscribed to {exchange_code}:{stock_code} live feed.")
 
-                    # Load the uploaded model file from BytesIO without saving locally
+                    # Load ML model from uploaded file
                     model_bytes = uploaded_model_file.read()
                     model = joblib.load(io.BytesIO(model_bytes))
                     st.session_state.model = model
@@ -844,8 +911,9 @@ with tab2:
 
                 except Exception as e:
                     st.error(f"Connection or model loading error: {e}")
+                    logger.error(f"Connection or model loading error: {e}")
 
-    # Display live data and ML signal
+    # Display live data and ML signal status
     if "live_data" in st.session_state and not st.session_state.live_data.empty:
         latest_price = st.session_state.live_data["last_traded_price"].iloc[-1]
         st.metric(f"{exchange_code.upper()} {stock_code.upper()} Live Price", latest_price)
@@ -853,12 +921,32 @@ with tab2:
         st.subheader("Latest Live Data with Indicators")
         st.dataframe(st.session_state.live_data.tail(10))
 
-        if "model" in st.session_state:
-            pred, conf = predict_signal(st.session_state.model, st.session_state.live_data)
-            if pred is not None:
-                signal_map = {1: "Buy", -1: "Sell", 0: "Hold"}
-                st.metric("ML Signal", signal_map.get(pred, "Unknown"), delta=f"Confidence: {conf:.2f}")
-            else:
-                st.info("Waiting for enough data to generate signal.")
+        # Show current position and trades summary
+        pos = st.session_state.position
+        if pos is not None:
+            st.info(f"Open Position: Entry Price ₹{pos['entry_price']:.2f} at {pos['entry_time']}")
+        else:
+            st.info("No open position.")
+
+        if st.session_state.trades:
+            trades_df = pd.DataFrame(st.session_state.trades)
+            st.subheader("Closed Trades")
+            st.dataframe(trades_df)
+
+        # Show equity curve chart
+        if st.session_state.equity_curve:
+            eq_df = pd.DataFrame(st.session_state.equity_curve)
+            eq_df["timestamp"] = pd.to_datetime(eq_df["timestamp"])
+            st.subheader("Equity Curve (PnL)")
+            st.line_chart(data=eq_df.set_index("timestamp")["total_pnl"])
     else:
-        st.info("Enter credentials, upload model, and hit Connect to start receiving live data.")
+        st.info("Enter credentials, upload model, and click Connect to start receiving live data.")
+
+    # Provide a button to download logs
+    if st.button("Download Logs"):
+        try:
+            with open("live_trading.log", "r") as f:
+                log_contents = f.read()
+            st.download_button(label="Download log file", data=log_contents, file_name="live_trading.log", mime="text/plain")
+        except Exception as e:
+            st.error(f"Failed to read log file: {e}")
