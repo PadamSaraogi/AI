@@ -754,9 +754,6 @@ with tab1:
             else:
                 st.info("No intraday trades data available to display outlier trades.")
 
-# Tabs
-tab1, tab2 = st.tabs(["Backtesting", "Live Trading"])
-
 with tab2:
 
     MAX_WINDOW_SIZE = 150
