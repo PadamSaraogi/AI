@@ -754,10 +754,10 @@ with tab1:
             else:
                 st.info("No intraday trades data available to display outlier trades.")
 
-MAX_WINDOW_SIZE = 150  # Number of latest ticks to keep
-MIN_UPDATE_INTERVAL = 60  # seconds, throttle live data processing to once per minute
+MAX_WINDOW_SIZE = 150
+MIN_UPDATE_INTERVAL = 60  # seconds
 
-# Setup logger for live trading events
+# Setup logger
 logger = logging.getLogger("LiveTradingLogger")
 logger.setLevel(logging.INFO)
 if not logger.hasHandlers():
@@ -767,25 +767,29 @@ if not logger.hasHandlers():
     logger.addHandler(handler)
 
 def setup_breeze(api_key, api_secret, session_token):
-    breeze = BreezeConnect(api_key=api_key)
-    breeze.generate_session(api_secret=api_secret, session_token=session_token)
-    return breeze
+    try:
+        breeze = BreezeConnect(api_key=api_key)
+        breeze.generate_session(api_secret=api_secret, session_token=session_token)
+        st.write("BreezeConnect session generated successfully.")
+        logger.info("BreezeConnect session generated successfully.")
+        return breeze
+    except Exception as e:
+        st.error(f"BreezeConnect session error: {e}")
+        logger.error(f"BreezeConnect session error: {e}")
+        return None
 
 def calculate_indicators_live(df):
     if df.empty or len(df) < 20:
-        return df  # Not enough data to calculate indicators
-    
+        return df
     df = df.set_index("timestamp")
-
     df['ema_20'] = ta.trend.ema_indicator(df['last_traded_price'], window=20)
     df['ema_50'] = ta.trend.ema_indicator(df['last_traded_price'], window=50)
-
-    df['ATR'] = ta.volatility.average_true_range(high=df['last_traded_price'],
-                                                 low=df['last_traded_price'],
-                                                 close=df['last_traded_price'],
-                                                 window=14)
+    df['ATR'] = ta.volatility.average_true_range(
+        high=df['last_traded_price'],
+        low=df['last_traded_price'],
+        close=df['last_traded_price'],
+        window=14)
     df['RSI'] = ta.momentum.rsi(df['last_traded_price'], window=14)
-
     df = df.reset_index()
     return df
 
@@ -810,11 +814,9 @@ def initialize_trade_state():
 def update_trades(signal, price, timestamp):
     pos = st.session_state.position
     if signal == 1 and pos is None:
-        # Open new position
         st.session_state.position = {"entry_price": price, "entry_time": timestamp}
         logger.info(f"Opened new position at price {price} on {timestamp}")
     elif signal == -1 and pos is not None:
-        # Close position
         pnl = price - pos["entry_price"]
         trade_record = {
             "entry_price": pos["entry_price"],
@@ -826,21 +828,30 @@ def update_trades(signal, price, timestamp):
         st.session_state.trades.append(trade_record)
         st.session_state.position = None
         logger.info(f"Closed position at price {price} on {timestamp} with PnL {pnl:.2f}")
-
-    # Update equity curve
     total_pnl = sum(t['pnl'] for t in st.session_state.trades)
     if pos is not None:
         total_pnl += (price - pos["entry_price"])
     st.session_state.equity_curve.append({"timestamp": timestamp, "total_pnl": total_pnl})
 
+# Troubleshooting debug flags
+SHOW_ON_TICKS_WRITES = True  # Set to True to always show tick debug messages
+
 def on_ticks(ticks):
-    st.write(f"Received {len(ticks)} ticks")
+    # Troubleshooting: Always echo to logs and UI
+    if SHOW_ON_TICKS_WRITES:
+        msg = f"{datetime.datetime.now()} - on_ticks called: Received {len(ticks)} ticks"
+        st.write(msg)
+        logger.info(msg)
+    if len(ticks) == 0:
+        logger.warning(f"{datetime.datetime.now()} - on_ticks called with empty ticks list.")
+        return
+
     current_time = time.time()
     if "last_calc_time" not in st.session_state:
         st.session_state.last_calc_time = 0
-
-    # Throttle processing to once per minute
     if current_time - st.session_state.last_calc_time < MIN_UPDATE_INTERVAL:
+        if SHOW_ON_TICKS_WRITES:
+            st.write(f"Throttled: Only updating every {MIN_UPDATE_INTERVAL} seconds.")
         return
     st.session_state.last_calc_time = current_time
 
@@ -850,7 +861,6 @@ def on_ticks(ticks):
 
     new_rows = []
     for tick in ticks:
-        # Parse timestamp; BreezeConnect timestamps are in ms UTC
         row = {
             "timestamp": pd.to_datetime(tick["timestamp"], unit='ms', utc=True),
             "last_traded_price": tick.get("last_traded_price", float('nan')),
@@ -859,27 +869,21 @@ def on_ticks(ticks):
         new_rows.append(row)
     new_df = pd.DataFrame(new_rows)
     st.session_state.live_data = pd.concat([st.session_state.live_data, new_df], ignore_index=True)
-
-    # Keep only the most recent MAX_WINDOW_SIZE rows
     if len(st.session_state.live_data) > MAX_WINDOW_SIZE:
         st.session_state.live_data = st.session_state.live_data.iloc[-MAX_WINDOW_SIZE:].reset_index(drop=True)
-
-    # Calculate Indicators
     st.session_state.live_data = calculate_indicators_live(st.session_state.live_data)
 
-    # Predict signal if model is loaded
     if "model" in st.session_state:
         pred, conf = predict_signal(st.session_state.model, st.session_state.live_data)
         if pred is not None:
             signal_map = {1: "Buy", -1: "Sell", 0: "Hold"}
             signal_str = signal_map.get(pred, "Unknown")
             logger.info(f"ML Signal: {signal_str} with confidence {conf:.2f}")
-            # Update trades based on signal and latest price/timestamp
             latest_price = st.session_state.live_data["last_traded_price"].iloc[-1]
             latest_timestamp = st.session_state.live_data["timestamp"].iloc[-1]
             update_trades(pred, latest_price, latest_timestamp)
 
-# Initialize tabs
+# Tabs
 tab1, tab2 = st.tabs(["Backtesting", "Live Trading"])
 
 with tab2:
@@ -890,47 +894,57 @@ with tab2:
     session_token = st.text_input("BreezeConnect Session Token", type="password")
     exchange_code = st.text_input("Exchange Code (e.g. NSE)")
     stock_code = st.text_input("Stock Code (e.g. RELIANCE)")
-
     uploaded_model_file = st.file_uploader("Upload trained ML model (.pkl)", type=["pkl"])
 
     connect_pressed = st.button("Connect and Subscribe")
 
     if connect_pressed:
+        st.write("Connect button pressed. Starting subscription procedure...")
+        logger.info("Connect button pressed. Starting subscription procedure...")
         if not all([api_key, api_secret, session_token, exchange_code, stock_code]):
             st.error("Please fill all credential and stock fields.")
+            logger.error("Missing credential/stock field.")
         elif uploaded_model_file is None:
             st.error("Please upload your trained model file (.pkl).")
+            logger.error("No model file uploaded.")
         else:
             if "breeze" not in st.session_state:
-                try:
-                    breeze = setup_breeze(api_key, api_secret, session_token)
-                    breeze.ws_connect()
-                    breeze.subscribe_feeds(exchange_code=exchange_code,
-                                           stock_code=stock_code,
-                                           product_type="cash")
-                    breeze.on_ticks = on_ticks
-                    st.session_state.breeze = breeze
-                    st.success(f"Subscribed to {exchange_code}:{stock_code} live feed.")
+                breeze = setup_breeze(api_key, api_secret, session_token)
+                if breeze is None:
+                    st.error("BreezeConnect session initialization failed.")
+                else:
+                    try:
+                        st.write("Attempting to connect to websocket...")
+                        logger.info("Attempting to connect to websocket...")
+                        breeze.ws_connect()
+                        st.write("Connected. Subscribing to feed...")
+                        logger.info("Connected. Subscribing to feed...")
+                        breeze.subscribe_feeds(exchange_code=exchange_code, stock_code=stock_code, product_type="cash")
+                        st.write("Subscription command sent. Assigning on_ticks callback...")
+                        logger.info("Subscription command sent. Assigning on_ticks callback...")
+                        breeze.on_ticks = on_ticks
+                        st.session_state.breeze = breeze
+                        st.success(f"Subscribed to {exchange_code}:{stock_code} live feed.")
+                        logger.info(f"Subscribed to {exchange_code}:{stock_code} live feed.")
 
-                    # Load ML model from uploaded file
-                    model_bytes = uploaded_model_file.read()
-                    model = joblib.load(io.BytesIO(model_bytes))
-                    st.session_state.model = model
-                    st.success("ML model loaded successfully.")
+                        # Load ML model from uploaded file
+                        model_bytes = uploaded_model_file.read()
+                        model = joblib.load(io.BytesIO(model_bytes))
+                        st.session_state.model = model
+                        st.success("ML model loaded successfully.")
+                        logger.info("ML model loaded successfully.")
 
-                except Exception as e:
-                    st.error(f"Connection or model loading error: {e}")
-                    logger.error(f"Connection or model loading error: {e}")
+                    except Exception as e:
+                        st.error(f"Connection or model loading error: {e}")
+                        logger.error(f"Connection or model loading error: {e}")
 
-    # Display live data and ML signal status
+    # Live data status and output
     if "live_data" in st.session_state and not st.session_state.live_data.empty:
         latest_price = st.session_state.live_data["last_traded_price"].iloc[-1]
         st.metric(f"{exchange_code.upper()} {stock_code.upper()} Live Price", latest_price)
-
         st.subheader("Latest Live Data with Indicators")
         st.dataframe(st.session_state.live_data.tail(10))
 
-        # Show current position and trades summary
         pos = st.session_state.position
         if pos is not None:
             st.info(f"Open Position: Entry Price ₹{pos['entry_price']:.2f} at {pos['entry_time']}")
@@ -942,7 +956,6 @@ with tab2:
             st.subheader("Closed Trades")
             st.dataframe(trades_df)
 
-        # Show equity curve chart
         if st.session_state.equity_curve:
             eq_df = pd.DataFrame(st.session_state.equity_curve)
             eq_df["timestamp"] = pd.to_datetime(eq_df["timestamp"])
@@ -950,8 +963,8 @@ with tab2:
             st.line_chart(data=eq_df.set_index("timestamp")["total_pnl"])
     else:
         st.info("Enter credentials, upload model, and click Connect to start receiving live data.")
+        st.warning("If no data appears, please confirm market is open, stock code is correct, and credentials/session tokens are active. Check logs for more info.")
 
-    # Provide a button to download logs
     if st.button("Download Logs"):
         try:
             with open("live_trading.log", "r") as f:
