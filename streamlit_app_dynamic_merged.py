@@ -894,6 +894,7 @@ with tab2:
     session_token = st.text_input("BreezeConnect Session Token", type="password")
     exchange_code = st.text_input("Exchange Code (e.g. NSE)")
     stock_code = st.text_input("Stock Code (e.g. RELIANCE)")
+    product_type = "cash" 
     uploaded_model_file = st.file_uploader("Upload trained ML model (.pkl)", type=["pkl"])
 
     connect_pressed = st.button("Connect and Subscribe")
