@@ -833,6 +833,7 @@ def update_trades(signal, price, timestamp):
     st.session_state.equity_curve.append({"timestamp": timestamp, "total_pnl": total_pnl})
 
 def on_ticks(ticks):
+    st.write(f"Received {len(ticks)} ticks")
     current_time = time.time()
     if "last_calc_time" not in st.session_state:
         st.session_state.last_calc_time = 0
