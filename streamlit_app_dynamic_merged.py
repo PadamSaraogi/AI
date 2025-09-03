@@ -895,7 +895,7 @@ with tab2:
     if connect_pressed:
         st.write("Connect button pressed. Starting subscription procedure...")
         logger.info("Connect button pressed. Starting subscription procedure...")
-        if not all([api_key, api_secret, session_token, exchange_code]):
+        if not all([session_token, exchange_code]):
             st.error("Please fill all credential and market fields.")
             logger.error("Missing credential/market field.")
         elif uploaded_model_file is None:
