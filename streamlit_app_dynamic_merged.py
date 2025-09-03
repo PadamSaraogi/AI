@@ -755,9 +755,13 @@ with tab1:
                 st.info("No intraday trades data available to display outlier trades.")
 
 with tab2:
-    
+        
     MAX_WINDOW_SIZE = 150
     MIN_UPDATE_INTERVAL = 60  # seconds
+    
+    # Hardcoded credentials
+    API_KEY = "4c730660p24@d03%65343MG909o217L"
+    API_SECRET = "416D2gJdy064P7F7)s5e590J8I1692~7"
     
     # Setup logger
     logger = logging.getLogger("LiveTradingLogger")
@@ -768,10 +772,10 @@ with tab2:
         handler.setFormatter(formatter)
         logger.addHandler(handler)
     
-    def setup_breeze(api_key, api_secret, session_token):
+    def setup_breeze(session_token):
         try:
-            breeze = BreezeConnect(api_key="=4c730660p24@d03%65343MG909o217L")
-            breeze.generate_session(api_secret="416D2gJdy064P7F7)s5e590J8I1692~7", session_token=session_token)
+            breeze = BreezeConnect(api_key=API_KEY)
+            breeze.generate_session(api_secret=API_SECRET, session_token=session_token)
             st.write("BreezeConnect session generated successfully.")
             logger.info("BreezeConnect session generated successfully.")
             return breeze
@@ -884,6 +888,7 @@ with tab2:
                 update_trades(pred, latest_price, latest_timestamp)
     
     st.header("Live Trading Dashboard")
+    
     session_token = st.text_input("BreezeConnect Session Token", type="password")
     exchange_code = st.text_input("Exchange Code (e.g. NSE)")
     stock_code = st.text_input("Stock Code (e.g. RELIANCE)")
@@ -903,7 +908,7 @@ with tab2:
             logger.error("No model file uploaded.")
         else:
             if "breeze" not in st.session_state:
-                breeze = setup_breeze(api_key, api_secret, session_token)
+                breeze = setup_breeze(session_token)
                 if breeze is None:
                     st.error("BreezeConnect session initialization failed.")
                 else:
