@@ -890,9 +890,10 @@ with tab2:
     exchange_code = st.text_input("Exchange Code (e.g. NSE)")
     stock_code = st.text_input("Stock Code (e.g. RELIANCE)")
     stock_token = st.text_input("Stock Token (if you want to use token; e.g. 1.1!500780)", value="", key="stock_token")
-    product_type = "cash" 
+    product_type = "cash"
     uploaded_model_file = st.file_uploader("Upload trained ML model (.pkl)", type=["pkl"])
     connect_pressed = st.button("Connect and Subscribe")
+    
     if connect_pressed:
         st.write("Connect button pressed. Starting subscription procedure...")
         logger.info("Connect button pressed. Starting subscription procedure...")
@@ -917,11 +918,21 @@ with tab2:
     
                         if stock_token.strip():
                             st.write(f"Subscribing using stock token: {stock_token}")
-                            breeze.subscribe_feeds(stock_token=stock_token.strip())
+                            breeze.subscribe_feeds(
+                                stock_token=stock_token.strip(),
+                                get_market_depth=False,
+                                get_exchange_quotes=True
+                            )
                             logger.info(f"Subscribed using stock_token={stock_token.strip()}")
                         elif stock_code.strip():
                             st.write(f"Subscribing using stock code: {stock_code} (exchange: {exchange_code}, product: {product_type})")
-                            breeze.subscribe_feeds(exchange_code=exchange_code, stock_code=stock_code, product_type=product_type)
+                            breeze.subscribe_feeds(
+                                exchange_code=exchange_code,
+                                stock_code=stock_code,
+                                product_type=product_type,
+                                get_market_depth=False,
+                                get_exchange_quotes=True
+                            )
                             logger.info(f"Subscribed using exchange_code={exchange_code}, stock_code={stock_code}, product_type={product_type}")
                         else:
                             st.error("Please enter either Stock Code or Stock Token")
@@ -965,6 +976,7 @@ with tab2:
     else:
         st.info("Enter credentials, upload model, and click Connect to start receiving live data.")
         st.warning("If no data appears, confirm: is the market open, is your code/token correct, and is your account permitted for live streaming? Check logs for more info.")
+    
     if st.button("Download Logs"):
         try:
             with open("live_trading.log", "r") as f:
