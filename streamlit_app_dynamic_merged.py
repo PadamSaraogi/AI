@@ -770,8 +770,8 @@ with tab2:
     
     def setup_breeze(api_key, api_secret, session_token):
         try:
-            breeze = BreezeConnect(api_key=api_key)
-            breeze.generate_session(api_secret=api_secret, session_token=session_token)
+            breeze = BreezeConnect(api_key="=4c730660p24@d03%65343MG909o217L")
+            breeze.generate_session(api_secret="416D2gJdy064P7F7)s5e590J8I1692~7", session_token=session_token)
             st.write("BreezeConnect session generated successfully.")
             logger.info("BreezeConnect session generated successfully.")
             return breeze
@@ -884,8 +884,6 @@ with tab2:
                 update_trades(pred, latest_price, latest_timestamp)
     
     st.header("Live Trading Dashboard")
-    api_key = st.text_input("BreezeConnect API Key", type="password")
-    api_secret = st.text_input("BreezeConnect API Secret", type="password")
     session_token = st.text_input("BreezeConnect Session Token", type="password")
     exchange_code = st.text_input("Exchange Code (e.g. NSE)")
     stock_code = st.text_input("Stock Code (e.g. RELIANCE)")
