@@ -755,7 +755,7 @@ with tab1:
                 st.info("No intraday trades data available to display outlier trades.")
 
 with tab2:
-
+    
     MAX_WINDOW_SIZE = 150
     MIN_UPDATE_INTERVAL = 60  # seconds
     
@@ -835,11 +835,9 @@ with tab2:
             total_pnl += (price - pos["entry_price"])
         st.session_state.equity_curve.append({"timestamp": timestamp, "total_pnl": total_pnl})
     
-    # Troubleshooting debug flags
-    SHOW_ON_TICKS_WRITES = True  # Set to True to always show tick debug messages
+    SHOW_ON_TICKS_WRITES = True
     
     def on_ticks(ticks):
-        # Troubleshooting: Always echo to logs and UI
         if SHOW_ON_TICKS_WRITES:
             msg = f"{datetime.datetime.now()} - on_ticks called: Received {len(ticks)} ticks"
             st.write(msg)
@@ -864,7 +862,7 @@ with tab2:
         new_rows = []
         for tick in ticks:
             row = {
-                "timestamp": pd.to_datetime(tick["timestamp"], unit='ms', utc=True),
+                "timestamp": pd.to_datetime(tick.get("timestamp", pd.Timestamp.now()), unit='ms', utc=True),
                 "last_traded_price": tick.get("last_traded_price", float('nan')),
                 "volume": tick.get("volume", float('nan')),
             }
@@ -884,25 +882,23 @@ with tab2:
                 latest_price = st.session_state.live_data["last_traded_price"].iloc[-1]
                 latest_timestamp = st.session_state.live_data["timestamp"].iloc[-1]
                 update_trades(pred, latest_price, latest_timestamp)
-
+    
     st.header("Live Trading Dashboard")
-
     api_key = st.text_input("BreezeConnect API Key", type="password")
     api_secret = st.text_input("BreezeConnect API Secret", type="password")
     session_token = st.text_input("BreezeConnect Session Token", type="password")
     exchange_code = st.text_input("Exchange Code (e.g. NSE)")
     stock_code = st.text_input("Stock Code (e.g. RELIANCE)")
+    stock_token = st.text_input("Stock Token (if you want to use token; e.g. 1.1!500780)", value="", key="stock_token")
     product_type = "cash" 
     uploaded_model_file = st.file_uploader("Upload trained ML model (.pkl)", type=["pkl"])
-
     connect_pressed = st.button("Connect and Subscribe")
-
     if connect_pressed:
         st.write("Connect button pressed. Starting subscription procedure...")
         logger.info("Connect button pressed. Starting subscription procedure...")
-        if not all([api_key, api_secret, session_token, exchange_code, stock_code]):
-            st.error("Please fill all credential and stock fields.")
-            logger.error("Missing credential/stock field.")
+        if not all([api_key, api_secret, session_token, exchange_code]):
+            st.error("Please fill all credential and market fields.")
+            logger.error("Missing credential/market field.")
         elif uploaded_model_file is None:
             st.error("Please upload your trained model file (.pkl).")
             logger.error("No model file uploaded.")
@@ -916,45 +912,51 @@ with tab2:
                         st.write("Attempting to connect to websocket...")
                         logger.info("Attempting to connect to websocket...")
                         breeze.ws_connect()
-                        st.write("Connected. Subscribing to feed...")
-                        logger.info("Connected. Subscribing to feed...")
-                        breeze.subscribe_feeds(exchange_code=exchange_code, stock_code=stock_code, product_type="cash")
+                        st.write("Connected. Choosing subscription method...")
+                        logger.info("Connected. Choosing subscription method...")
+    
+                        if stock_token.strip():
+                            st.write(f"Subscribing using stock token: {stock_token}")
+                            breeze.subscribe_feeds(stock_token=stock_token.strip())
+                            logger.info(f"Subscribed using stock_token={stock_token.strip()}")
+                        elif stock_code.strip():
+                            st.write(f"Subscribing using stock code: {stock_code} (exchange: {exchange_code}, product: {product_type})")
+                            breeze.subscribe_feeds(exchange_code=exchange_code, stock_code=stock_code, product_type=product_type)
+                            logger.info(f"Subscribed using exchange_code={exchange_code}, stock_code={stock_code}, product_type={product_type}")
+                        else:
+                            st.error("Please enter either Stock Code or Stock Token")
+                            logger.error("No stock code or stock token provided for subscription.")
+    
                         st.write("Subscription command sent. Assigning on_ticks callback...")
                         logger.info("Subscription command sent. Assigning on_ticks callback...")
                         breeze.on_ticks = on_ticks
                         st.session_state.breeze = breeze
-                        st.success(f"Subscribed to {exchange_code}:{stock_code} live feed.")
-                        logger.info(f"Subscribed to {exchange_code}:{stock_code} live feed.")
-
+                        st.success(f"Subscribed to {exchange_code}:{stock_code or stock_token} live feed.")
+                        logger.info(f"Subscribed to {exchange_code}:{stock_code or stock_token} live feed.")
                         # Load ML model from uploaded file
                         model_bytes = uploaded_model_file.read()
                         model = joblib.load(io.BytesIO(model_bytes))
                         st.session_state.model = model
                         st.success("ML model loaded successfully.")
                         logger.info("ML model loaded successfully.")
-
                     except Exception as e:
                         st.error(f"Connection or model loading error: {e}")
                         logger.error(f"Connection or model loading error: {e}")
-
-    # Live data status and output
+    
     if "live_data" in st.session_state and not st.session_state.live_data.empty:
         latest_price = st.session_state.live_data["last_traded_price"].iloc[-1]
-        st.metric(f"{exchange_code.upper()} {stock_code.upper()} Live Price", latest_price)
+        st.metric(f"{exchange_code.upper()} {(stock_code or stock_token).upper()} Live Price", latest_price)
         st.subheader("Latest Live Data with Indicators")
         st.dataframe(st.session_state.live_data.tail(10))
-
         pos = st.session_state.position
         if pos is not None:
             st.info(f"Open Position: Entry Price ₹{pos['entry_price']:.2f} at {pos['entry_time']}")
         else:
             st.info("No open position.")
-
         if st.session_state.trades:
             trades_df = pd.DataFrame(st.session_state.trades)
             st.subheader("Closed Trades")
             st.dataframe(trades_df)
-
         if st.session_state.equity_curve:
             eq_df = pd.DataFrame(st.session_state.equity_curve)
             eq_df["timestamp"] = pd.to_datetime(eq_df["timestamp"])
@@ -962,8 +964,7 @@ with tab2:
             st.line_chart(data=eq_df.set_index("timestamp")["total_pnl"])
     else:
         st.info("Enter credentials, upload model, and click Connect to start receiving live data.")
-        st.warning("If no data appears, please confirm market is open, stock code is correct, and credentials/session tokens are active. Check logs for more info.")
-
+        st.warning("If no data appears, confirm: is the market open, is your code/token correct, and is your account permitted for live streaming? Check logs for more info.")
     if st.button("Download Logs"):
         try:
             with open("live_trading.log", "r") as f:
