@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import seaborn as sns
+from urllib.parse import quote_plus
 import logging
 import streamlit.components.v1 as components
 import matplotlib.pyplot as plt
