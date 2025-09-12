@@ -760,8 +760,13 @@ with tab2:
     MIN_UPDATE_INTERVAL = 60  # seconds
     
     # Hardcoded credentials
-    API_KEY = "4c730660p24@d03%65343MG909o217L"
-    API_SECRET = "416D2gJdy064P7F7)s5e590J8I1692~7"
+    RAW_API_KEY = "4c730660p24@d03%65343MG909o217L"
+    RAW_API_SECRET = "416D2gJdy064P7F7)s5e590J8I1692~7"
+
+    API_KEY = RAW_API_KEY.strip()
+    API_SECRET = RAW_API_SECRET.strip() 
+    ENCODED_API_KEY = urllib.parse.quote_plus(API_KEY)
+
     
     # Setup logger
     logger = logging.getLogger("LiveTradingLogger")
@@ -774,6 +779,9 @@ with tab2:
     
     def setup_breeze(session_token):
         try:
+            # Print both the raw and URL-encoded API Key for diagnostics
+            print(f"Using API_KEY: {repr(API_KEY)}")
+            print(f"Using ENCODED_API_KEY: {repr(ENCODED_API_KEY)}")
             breeze = BreezeConnect(api_key=API_KEY)
             breeze.generate_session(api_secret=API_SECRET, session_token=session_token)
             st.write("BreezeConnect session generated successfully.")
