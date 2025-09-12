@@ -762,7 +762,7 @@ with tab2:
     MIN_UPDATE_INTERVAL = 60  # seconds
     
     # Hardcoded credentials
-    RAW_API_KEY = "4c730660p24@d03%65343MG909o217L"
+    RAW_API_KEY = "=4c730660p24@d03%65343MG909o217L"
     RAW_API_SECRET = "416D2gJdy064P7F7)s5e590J8I1692~7"
 
     API_KEY = RAW_API_KEY.strip()
