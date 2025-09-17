@@ -21,6 +21,7 @@ import joblib
 import time
 import io
 
+st.set_page_config(layout="wide")
 st.markdown("""
     <div style='display: flex; align-items: center;'>
         <img src='https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/React-icon.svg/512px-React-icon.svg.png' width='60'>
