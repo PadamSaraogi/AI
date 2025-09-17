@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from backtest import run_backtest_simulation
 import datetime
+import threading
+import queue
 from breeze_connect import BreezeConnect
 import streamlit as st
 import pandas as pd
@@ -757,7 +759,7 @@ with tab1:
                 st.info("No intraday trades data available to display outlier trades.")
 
 with tab2:
-    
+        
     MAX_WINDOW_SIZE = 150
     MIN_UPDATE_INTERVAL = 60  # seconds
     
@@ -767,7 +769,6 @@ with tab2:
     API_SECRET = RAW_API_SECRET.strip()
     ENCODED_API_KEY = quote_plus(API_KEY)
     
-    # Configure logger
     logger = logging.getLogger("LiveTradingLogger")
     logger.setLevel(logging.INFO)
     if not logger.hasHandlers():
@@ -775,6 +776,9 @@ with tab2:
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
+    
+    # Thread-safe queue to receive ticks from websocket thread
+    tick_queue = queue.Queue()
     
     def setup_breeze(session_token):
         try:
@@ -846,50 +850,44 @@ with tab2:
     
     SHOW_ON_TICKS_WRITES = True
     
+    # WebSocket callback just enqueues ticks
     def on_ticks(ticks):
-        # Initialize last_calc_time if not present
-        if "last_calc_time" not in st.session_state:
-            st.session_state.last_calc_time = 0
-    
+        tick_queue.put(ticks)
         if SHOW_ON_TICKS_WRITES:
-            msg = f"{datetime.datetime.now()} - on_ticks called: Received {len(ticks)} ticks"
-            st.write(msg)
-            logger.info(msg)
-        if len(ticks) == 0:
-            logger.warning(f"{datetime.datetime.now()} - on_ticks called with empty ticks list.")
-            return
+            logger.info(f"Enqueued {len(ticks)} ticks.")
     
-        current_time = time.time()
-        if current_time - st.session_state.last_calc_time < MIN_UPDATE_INTERVAL:
-            if SHOW_ON_TICKS_WRITES:
-                st.write(f"Throttled: Only updating every {MIN_UPDATE_INTERVAL} seconds.")
-            return
-        st.session_state.last_calc_time = current_time
-    
+    # Called each Streamlit rerun to process ticks safely and update session state
+    def process_tick_queue():
         if "live_data" not in st.session_state or st.session_state.live_data is None:
             st.session_state.live_data = pd.DataFrame()
         initialize_trade_state()
     
-        new_rows = []
-        for tick in ticks:
-            row = {
-                "timestamp": pd.to_datetime(tick.get("timestamp", pd.Timestamp.now()), unit='ms', utc=True),
-                "last_traded_price": tick.get("last_traded_price", float('nan')),
-                "volume": tick.get("volume", float('nan')),
-            }
-            new_rows.append(row)
-        new_df = pd.DataFrame(new_rows)
-        if st.session_state.live_data.empty:
-            st.session_state.live_data = new_df
-        else:
-            st.session_state.live_data = pd.concat([st.session_state.live_data, new_df], ignore_index=True)
-        if len(st.session_state.live_data) > MAX_WINDOW_SIZE:
-            st.session_state.live_data = st.session_state.live_data.iloc[-MAX_WINDOW_SIZE:].reset_index(drop=True)
-        st.session_state.live_data = calculate_indicators_live(st.session_state.live_data)
+        processed_rows = 0
+        while not tick_queue.empty():
+            ticks = tick_queue.get()
+            new_rows = []
+            for tick in ticks:
+                row = {
+                    "timestamp": pd.to_datetime(tick.get("timestamp", pd.Timestamp.now()), unit='ms', utc=True),
+                    "last_traded_price": tick.get("last_traded_price", float('nan')),
+                    "volume": tick.get("volume", float('nan')),
+                }
+                new_rows.append(row)
+            new_df = pd.DataFrame(new_rows)
+            if st.session_state.live_data.empty:
+                st.session_state.live_data = new_df
+            else:
+                st.session_state.live_data = pd.concat([st.session_state.live_data, new_df], ignore_index=True)
+            processed_rows += len(new_rows)
     
-        logger.info(f"Live data size: {len(st.session_state.live_data)}")
+            if len(st.session_state.live_data) > MAX_WINDOW_SIZE:
+                st.session_state.live_data = st.session_state.live_data.iloc[-MAX_WINDOW_SIZE:].reset_index(drop=True)
     
-        if "model" in st.session_state:
+        if processed_rows > 0:
+            st.session_state.live_data = calculate_indicators_live(st.session_state.live_data)
+            logger.info(f"Processed {processed_rows} tick rows into live_data.")
+    
+        if "model" in st.session_state and not st.session_state.live_data.empty:
             pred, conf = predict_signal(st.session_state.model, st.session_state.live_data)
             if pred is not None:
                 signal_map = {1: "Buy", -1: "Sell", 0: "Hold"}
@@ -900,6 +898,9 @@ with tab2:
                 update_trades(pred, latest_price, latest_timestamp)
     
     st.header("Live Trading Dashboard")
+    
+    if "last_calc_time" not in st.session_state:
+        st.session_state.last_calc_time = 0
     
     session_token = st.text_input("BreezeConnect Session Token", type="password")
     exchange_code = st.text_input("Exchange Code (e.g. NSE)")
@@ -960,7 +961,6 @@ with tab2:
                         st.success(f"Subscribed to {exchange_code}:{stock_code or stock_token} live feed.")
                         logger.info(f"Subscribed to {exchange_code}:{stock_code or stock_token} live feed.")
     
-                        # Load ML model from uploaded file
                         model_bytes = uploaded_model_file.read()
                         model = joblib.load(io.BytesIO(model_bytes))
                         st.session_state.model = model
@@ -969,6 +969,8 @@ with tab2:
                     except Exception as e:
                         st.error(f"Connection or model loading error: {e}")
                         logger.error(f"Connection or model loading error: {e}")
+    
+    process_tick_queue()
     
     if "live_data" in st.session_state and st.session_state.live_data is not None and not st.session_state.live_data.empty:
         latest_price = st.session_state.live_data["last_traded_price"].iloc[-1]
@@ -1011,7 +1013,6 @@ with tab2:
             eq_df["timestamp"] = pd.to_datetime(eq_df["timestamp"])
             st.subheader("Equity Curve (PnL)")
             st.line_chart(eq_df.set_index("timestamp")["total_pnl"])
-    
     else:
         st.info("Enter credentials, upload model, and click Connect to start receiving live data.")
         st.warning("If no data appears, confirm: is the market open, is your code/token correct, and is your account permitted for live streaming? Check logs for more info.")
