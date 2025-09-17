@@ -757,18 +757,17 @@ with tab1:
                 st.info("No intraday trades data available to display outlier trades.")
 
 with tab2:
-
+    
     MAX_WINDOW_SIZE = 150
     MIN_UPDATE_INTERVAL = 60  # seconds
     
-    # Hardcoded credentials (replace with your actual values)
     RAW_API_KEY = "=4c730660p24@d03%65343MG909o217L"
     RAW_API_SECRET = "416D2gJdy064P7F7)s5e590J8I1692~7"
     API_KEY = RAW_API_KEY.strip()
     API_SECRET = RAW_API_SECRET.strip()
     ENCODED_API_KEY = quote_plus(API_KEY)
     
-    # Setup logger
+    # Configure logger
     logger = logging.getLogger("LiveTradingLogger")
     logger.setLevel(logging.INFO)
     if not logger.hasHandlers():
@@ -848,8 +847,10 @@ with tab2:
     SHOW_ON_TICKS_WRITES = True
     
     def on_ticks(ticks):
+        # Initialize last_calc_time if not present
         if "last_calc_time" not in st.session_state:
             st.session_state.last_calc_time = 0
+    
         if SHOW_ON_TICKS_WRITES:
             msg = f"{datetime.datetime.now()} - on_ticks called: Received {len(ticks)} ticks"
             st.write(msg)
@@ -859,8 +860,6 @@ with tab2:
             return
     
         current_time = time.time()
-        if "last_calc_time" not in st.session_state:
-            st.session_state.last_calc_time = 0
         if current_time - st.session_state.last_calc_time < MIN_UPDATE_INTERVAL:
             if SHOW_ON_TICKS_WRITES:
                 st.write(f"Throttled: Only updating every {MIN_UPDATE_INTERVAL} seconds.")
@@ -888,7 +887,6 @@ with tab2:
             st.session_state.live_data = st.session_state.live_data.iloc[-MAX_WINDOW_SIZE:].reset_index(drop=True)
         st.session_state.live_data = calculate_indicators_live(st.session_state.live_data)
     
-        # Debug: Show live data length
         logger.info(f"Live data size: {len(st.session_state.live_data)}")
     
         if "model" in st.session_state:
