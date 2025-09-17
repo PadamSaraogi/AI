@@ -1,3 +1,4 @@
+streamlit_autorefresh
 streamlit==1.33.0
 pandas==2.2.2
 numpy==1.26.4
