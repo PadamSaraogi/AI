@@ -939,7 +939,6 @@ with tab2:
                 logger.info(f"ML Signal processed: {pred} (conf={conf})")
     
     # ---------------- Streamlit UI ----------------
-    st.set_page_config(page_title="Live Trading Dashboard", layout="wide")
     st.header("📊 Live Trading Dashboard")
     
     # Sidebar - Connection + Model
