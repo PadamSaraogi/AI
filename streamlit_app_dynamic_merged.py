@@ -761,14 +761,12 @@ with tab2:
     MAX_WINDOW_SIZE = 150
     MIN_UPDATE_INTERVAL = 60  # seconds
     
-    # Hardcoded credentials
+    # Hardcoded credentials (replace with your actual values)
     RAW_API_KEY = "=4c730660p24@d03%65343MG909o217L"
     RAW_API_SECRET = "416D2gJdy064P7F7)s5e590J8I1692~7"
-
     API_KEY = RAW_API_KEY.strip()
-    API_SECRET = RAW_API_SECRET.strip() 
-    ENCODED_API_KEY = urllib.parse.quote_plus(API_KEY)
-
+    API_SECRET = RAW_API_SECRET.strip()
+    ENCODED_API_KEY = quote_plus(API_KEY)
     
     # Setup logger
     logger = logging.getLogger("LiveTradingLogger")
@@ -781,9 +779,7 @@ with tab2:
     
     def setup_breeze(session_token):
         try:
-            # Print both the raw and URL-encoded API Key for diagnostics
-            print(f"Using API_KEY: {repr(API_KEY)}")
-            print(f"Using ENCODED_API_KEY: {repr(ENCODED_API_KEY)}")
+            logger.info(f"Using API Key: {API_KEY} | Encoded API Key: {ENCODED_API_KEY}")
             breeze = BreezeConnect(api_key=API_KEY)
             breeze.generate_session(api_secret=API_SECRET, session_token=session_token)
             st.write("BreezeConnect session generated successfully.")
@@ -869,7 +865,7 @@ with tab2:
             return
         st.session_state.last_calc_time = current_time
     
-        if "live_data" not in st.session_state:
+        if "live_data" not in st.session_state or st.session_state.live_data is None:
             st.session_state.live_data = pd.DataFrame()
         initialize_trade_state()
     
@@ -882,10 +878,16 @@ with tab2:
             }
             new_rows.append(row)
         new_df = pd.DataFrame(new_rows)
-        st.session_state.live_data = pd.concat([st.session_state.live_data, new_df], ignore_index=True)
+        if st.session_state.live_data.empty:
+            st.session_state.live_data = new_df
+        else:
+            st.session_state.live_data = pd.concat([st.session_state.live_data, new_df], ignore_index=True)
         if len(st.session_state.live_data) > MAX_WINDOW_SIZE:
             st.session_state.live_data = st.session_state.live_data.iloc[-MAX_WINDOW_SIZE:].reset_index(drop=True)
         st.session_state.live_data = calculate_indicators_live(st.session_state.live_data)
+    
+        # Debug: Show live data length
+        logger.info(f"Live data size: {len(st.session_state.live_data)}")
     
         if "model" in st.session_state:
             pred, conf = predict_signal(st.session_state.model, st.session_state.live_data)
@@ -957,6 +959,7 @@ with tab2:
                         st.session_state.breeze = breeze
                         st.success(f"Subscribed to {exchange_code}:{stock_code or stock_token} live feed.")
                         logger.info(f"Subscribed to {exchange_code}:{stock_code or stock_token} live feed.")
+    
                         # Load ML model from uploaded file
                         model_bytes = uploaded_model_file.read()
                         model = joblib.load(io.BytesIO(model_bytes))
@@ -967,25 +970,48 @@ with tab2:
                         st.error(f"Connection or model loading error: {e}")
                         logger.error(f"Connection or model loading error: {e}")
     
-    if "live_data" in st.session_state and not st.session_state.live_data.empty:
+    if "live_data" in st.session_state and st.session_state.live_data is not None and not st.session_state.live_data.empty:
         latest_price = st.session_state.live_data["last_traded_price"].iloc[-1]
         st.metric(f"{exchange_code.upper()} {(stock_code or stock_token).upper()} Live Price", latest_price)
-        st.subheader("Latest Live Data with Indicators")
+    
+        st.subheader("Live Price Curve")
+        st.line_chart(st.session_state.live_data.set_index("timestamp")["last_traded_price"])
+    
+        st.subheader("Volume")
+        st.line_chart(st.session_state.live_data.set_index("timestamp")["volume"])
+    
+        if all(x in st.session_state.live_data.columns for x in ["ema_20", "ema_50"]):
+            st.subheader("EMA 20 & EMA 50")
+            st.line_chart(st.session_state.live_data.set_index("timestamp")[["ema_20", "ema_50"]])
+    
+        if "RSI" in st.session_state.live_data.columns:
+            st.subheader("RSI")
+            st.line_chart(st.session_state.live_data.set_index("timestamp")["RSI"])
+    
+        if "ATR" in st.session_state.live_data.columns:
+            st.subheader("ATR")
+            st.line_chart(st.session_state.live_data.set_index("timestamp")["ATR"])
+    
+        st.subheader("Latest Live Data Snapshot")
         st.dataframe(st.session_state.live_data.tail(10))
+    
         pos = st.session_state.position
         if pos is not None:
             st.info(f"Open Position: Entry Price ₹{pos['entry_price']:.2f} at {pos['entry_time']}")
         else:
             st.info("No open position.")
+    
         if st.session_state.trades:
             trades_df = pd.DataFrame(st.session_state.trades)
             st.subheader("Closed Trades")
             st.dataframe(trades_df)
+    
         if st.session_state.equity_curve:
             eq_df = pd.DataFrame(st.session_state.equity_curve)
             eq_df["timestamp"] = pd.to_datetime(eq_df["timestamp"])
             st.subheader("Equity Curve (PnL)")
-            st.line_chart(data=eq_df.set_index("timestamp")["total_pnl"])
+            st.line_chart(eq_df.set_index("timestamp")["total_pnl"])
+    
     else:
         st.info("Enter credentials, upload model, and click Connect to start receiving live data.")
         st.warning("If no data appears, confirm: is the market open, is your code/token correct, and is your account permitted for live streaming? Check logs for more info.")
