@@ -1010,9 +1010,7 @@ with tab2:
                         st.error(f"Connection or subscription error: {e}")
                         logger.error(f"Connection or subscription error: {e}")
     
-    # Auto-refresh so Streamlit main thread processes queue periodically (every 2s)
-    st_autorefresh(interval=2000, limit=None, key="auto_refresh")
-    
+
     # Process incoming ticks into session_state (main thread)
     process_tick_queue()
     
