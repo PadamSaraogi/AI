@@ -1,5 +1,6 @@
 
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 import numpy as np
 import urllib.parse
