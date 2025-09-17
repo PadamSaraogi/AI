@@ -759,7 +759,7 @@ with tab1:
                 st.info("No intraday trades data available to display outlier trades.")
 
 with tab2:
-        
+            
     MAX_WINDOW_SIZE = 150
     MIN_UPDATE_INTERVAL = 60  # seconds
     
@@ -779,6 +779,23 @@ with tab2:
     
     # Thread-safe queue to receive ticks from websocket thread
     tick_queue = queue.Queue()
+    
+    # ---------------- Session State Initialization ----------------
+    if "last_calc_time" not in st.session_state:
+        st.session_state.last_calc_time = 0
+    if "live_data" not in st.session_state:
+        st.session_state.live_data = pd.DataFrame()
+    if "position" not in st.session_state:
+        st.session_state.position = None
+    if "trades" not in st.session_state:
+        st.session_state.trades = []
+    if "equity_curve" not in st.session_state:
+        st.session_state.equity_curve = []
+    if "model" not in st.session_state:
+        st.session_state.model = None
+    if "breeze" not in st.session_state:
+        st.session_state.breeze = None
+    # ---------------------------------------------------------------
     
     def setup_breeze(session_token):
         try:
@@ -818,14 +835,6 @@ with tab2:
         proba = model.predict_proba(X).max()
         return pred, proba
     
-    def initialize_trade_state():
-        if "position" not in st.session_state:
-            st.session_state.position = None
-        if "trades" not in st.session_state:
-            st.session_state.trades = []
-        if "equity_curve" not in st.session_state:
-            st.session_state.equity_curve = []
-    
     def update_trades(signal, price, timestamp):
         pos = st.session_state.position
         if signal == 1 and pos is None:
@@ -850,18 +859,15 @@ with tab2:
     
     SHOW_ON_TICKS_WRITES = True
     
-    # WebSocket callback just enqueues ticks
+    # ---------------- WebSocket callback ----------------
     def on_ticks(ticks):
+        """Background thread callback — only enqueue data, never touch st.session_state."""
         tick_queue.put(ticks)
         if SHOW_ON_TICKS_WRITES:
             logger.info(f"Enqueued {len(ticks)} ticks.")
+    # -----------------------------------------------------
     
-    # Called each Streamlit rerun to process ticks safely and update session state
     def process_tick_queue():
-        if "live_data" not in st.session_state or st.session_state.live_data is None:
-            st.session_state.live_data = pd.DataFrame()
-        initialize_trade_state()
-    
         processed_rows = 0
         while not tick_queue.empty():
             ticks = tick_queue.get()
@@ -887,7 +893,7 @@ with tab2:
             st.session_state.live_data = calculate_indicators_live(st.session_state.live_data)
             logger.info(f"Processed {processed_rows} tick rows into live_data.")
     
-        if "model" in st.session_state and not st.session_state.live_data.empty:
+        if st.session_state.model and not st.session_state.live_data.empty:
             pred, conf = predict_signal(st.session_state.model, st.session_state.live_data)
             if pred is not None:
                 signal_map = {1: "Buy", -1: "Sell", 0: "Hold"}
@@ -897,10 +903,8 @@ with tab2:
                 latest_timestamp = st.session_state.live_data["timestamp"].iloc[-1]
                 update_trades(pred, latest_price, latest_timestamp)
     
+    # ---------------- Streamlit UI ----------------
     st.header("Live Trading Dashboard")
-    
-    if "last_calc_time" not in st.session_state:
-        st.session_state.last_calc_time = 0
     
     session_token = st.text_input("BreezeConnect Session Token", type="password")
     exchange_code = st.text_input("Exchange Code (e.g. NSE)")
@@ -920,7 +924,7 @@ with tab2:
             st.error("Please upload your trained model file (.pkl).")
             logger.error("No model file uploaded.")
         else:
-            if "breeze" not in st.session_state:
+            if st.session_state.breeze is None:
                 breeze = setup_breeze(session_token)
                 if breeze is None:
                     st.error("BreezeConnect session initialization failed.")
@@ -970,9 +974,10 @@ with tab2:
                         st.error(f"Connection or model loading error: {e}")
                         logger.error(f"Connection or model loading error: {e}")
     
+    # Process tick queue each run
     process_tick_queue()
     
-    if "live_data" in st.session_state and st.session_state.live_data is not None and not st.session_state.live_data.empty:
+    if not st.session_state.live_data.empty:
         latest_price = st.session_state.live_data["last_traded_price"].iloc[-1]
         st.metric(f"{exchange_code.upper()} {(stock_code or stock_token).upper()} Live Price", latest_price)
     
