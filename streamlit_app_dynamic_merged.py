@@ -848,6 +848,8 @@ with tab2:
     SHOW_ON_TICKS_WRITES = True
     
     def on_ticks(ticks):
+        if "last_calc_time" not in st.session_state:
+            st.session_state.last_calc_time = 0
         if SHOW_ON_TICKS_WRITES:
             msg = f"{datetime.datetime.now()} - on_ticks called: Received {len(ticks)} ticks"
             st.write(msg)
