@@ -983,6 +983,15 @@ with tab2:
     # Process queue and reconnect if needed
     process_tick_queue()
     reconnect_ws()
+
+    st.subheader("📡 Raw Tick Stream")
+    if not st.session_state.live_data.empty:
+        # Show the last 5 raw tick rows
+        tick_preview = st.session_state.live_data.tail(5)
+        st.write("Here are the most recent ticks received:")
+        st.dataframe(tick_preview)
+    else:
+        st.warning("⚠ No raw ticks received yet.")
     
     # ---------------- Dashboard ----------------
     if not st.session_state.live_data.empty:
