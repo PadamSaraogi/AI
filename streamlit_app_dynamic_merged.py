@@ -789,6 +789,7 @@ with tab2:
         "model": None,
         "breeze": None,
         "ws_connected": False,
+        "ui_logs": [],
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -797,16 +798,24 @@ with tab2:
     # ---------------- QUEUE ----------------
     tick_queue = queue.Queue()
     
+    # ---------------- UI LOGGING ----------------
+    def ui_log(msg):
+        """Log to both file and UI (last 50 lines)"""
+        logger.info(msg)
+        st.session_state.ui_logs.append(f"{datetime.datetime.now().strftime('%H:%M:%S')} - {msg}")
+        if len(st.session_state.ui_logs) > 50:
+            st.session_state.ui_logs.pop(0)
+    
     # ---------------- BREEZE ----------------
     def setup_breeze(session_token):
         try:
             breeze = BreezeConnect(api_key=API_KEY)
             breeze.generate_session(api_secret=API_SECRET, session_token=session_token)
-            logger.info("✅ BreezeConnect session generated successfully.")
+            ui_log("✅ Breeze session generated successfully.")
             return breeze
         except Exception as e:
             st.error(f"Breeze session error: {e}")
-            logger.error(f"Breeze session error: {e}")
+            ui_log(f"Breeze session error: {e}")
             return None
     
     def safe_ws_connect():
@@ -814,17 +823,22 @@ with tab2:
             if st.session_state.breeze:
                 st.session_state.breeze.ws_connect()
                 st.session_state.ws_connected = True
-                logger.info("WebSocket connected successfully.")
+                ui_log("🌐 WebSocket connected successfully.")
         except Exception as e:
             st.session_state.ws_connected = False
-            logger.error(f"WebSocket connection failed: {e}")
+            ui_log(f"WebSocket connection failed: {e}")
     
     def safe_subscribe(exchange_code, stock_code, stock_token, product_type):
         try:
             if st.session_state.breeze:
                 if stock_token.strip():
-                    st.session_state.breeze.subscribe_feeds(stock_token=stock_token.strip(), get_exchange_quotes=True)
+                    ui_log(f"📡 Subscribing with stock_token={stock_token.strip()}")
+                    st.session_state.breeze.subscribe_feeds(
+                        stock_token=stock_token.strip(),
+                        get_exchange_quotes=True,
+                    )
                 elif stock_code.strip():
+                    ui_log(f"📡 Subscribing with exchange={exchange_code}, stock_code={stock_code}, product_type={product_type}")
                     st.session_state.breeze.subscribe_feeds(
                         exchange_code=exchange_code,
                         stock_code=stock_code,
@@ -832,13 +846,12 @@ with tab2:
                         get_exchange_quotes=True,
                     )
                 st.session_state.breeze.on_ticks = on_ticks
-                logger.info("✅ Subscribed to live feed.")
+                ui_log("✅ Subscribed and on_ticks callback assigned")
         except Exception as e:
-            logger.error(f"Subscription error: {e}")
+            ui_log(f"Subscription error: {e}")
             st.error(f"Subscription failed: {e}")
     
     def reconnect_ws():
-        """Reconnect WebSocket if disconnected"""
         if not st.session_state.ws_connected and st.session_state.breeze:
             time.sleep(2)
             safe_ws_connect()
@@ -873,7 +886,7 @@ with tab2:
         pos = st.session_state.position
         if signal == 1 and pos is None:
             st.session_state.position = {"entry_price": price, "entry_time": timestamp}
-            logger.info(f"Opened position at {price} on {timestamp}")
+            ui_log(f"🟢 Opened position at {price} on {timestamp}")
         elif signal == -1 and pos is not None:
             pnl = price - pos["entry_price"]
             trade_record = {
@@ -885,7 +898,7 @@ with tab2:
             }
             st.session_state.trades.append(trade_record)
             st.session_state.position = None
-            logger.info(f"Closed position at {price} | PnL {pnl:.2f}")
+            ui_log(f"🔴 Closed position at {price} | PnL {pnl:.2f}")
         total_pnl = sum(t['pnl'] for t in st.session_state.trades)
         if pos is not None:
             total_pnl += (price - pos["entry_price"])
@@ -895,8 +908,9 @@ with tab2:
     def on_ticks(ticks):
         try:
             tick_queue.put(ticks)
+            ui_log(f"Received ticks: {ticks}")
         except Exception as e:
-            logger.error(f"on_ticks error: {e}")
+            ui_log(f"on_ticks error: {e}")
     
     def process_tick_queue():
         processed_rows = 0
@@ -960,7 +974,10 @@ with tab2:
                 model_bytes = uploaded_model_file.read()
                 st.session_state.model = joblib.load(io.BytesIO(model_bytes))
                 st.success("✅ Connected & model loaded.")
-
+    
+    # Process queue and reconnect if needed
+    process_tick_queue()
+    reconnect_ws()
     
     # ---------------- Dashboard ----------------
     if not st.session_state.live_data.empty:
@@ -1006,7 +1023,20 @@ with tab2:
     else:
         st.info("⚙️ Connect with valid credentials and wait for live ticks...")
     
-    # Logs
+    # ---------------- Debug Panel ----------------
+    st.subheader("🪵 Debug Log (last 50 events)")
+    if st.session_state.ui_logs:
+        st.text("\n".join(st.session_state.ui_logs))
+    else:
+        st.info("No logs yet... connect to start logging.")
+    
+    if not st.session_state.live_data.empty:
+        st.subheader("🔍 Latest Tick Data Preview")
+        st.dataframe(st.session_state.live_data.tail(5))
+    else:
+        st.warning("⚠ No ticks received yet. Check if market is open, identifiers are valid, and account has live data access.")
+    
+    # Logs download
     if st.button("📥 Download Logs"):
         try:
             with open("live_trading.log", "r") as f:
