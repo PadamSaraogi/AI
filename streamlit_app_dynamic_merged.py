@@ -906,16 +906,18 @@ with tab2:
     
     # ---------------- WEBSOCKET ----------------
     def on_ticks(ticks):
+        """Thread-safe: only put into queue, no Streamlit calls here."""
         try:
             tick_queue.put(ticks)
-            ui_log(f"Received ticks: {ticks}")
+            logger.info(f"Received ticks: {ticks}")  # file log only
         except Exception as e:
-            ui_log(f"on_ticks error: {e}")
+            logger.error(f"on_ticks error: {e}")
     
     def process_tick_queue():
         processed_rows = 0
         while not tick_queue.empty():
             ticks = tick_queue.get()
+            ui_log(f"Processing {len(ticks)} new ticks")
             new_rows = []
             for t in ticks:
                 ts = None
@@ -941,8 +943,11 @@ with tab2:
                 processed_rows += len(new_rows)
                 if len(st.session_state.live_data) > MAX_WINDOW_SIZE:
                     st.session_state.live_data = st.session_state.live_data.iloc[-MAX_WINDOW_SIZE:].reset_index(drop=True)
+    
         if processed_rows > 0:
+            ui_log(f"✅ Processed {processed_rows} tick rows (live_data size={len(st.session_state.live_data)})")
             st.session_state.live_data = calculate_indicators_live(st.session_state.live_data)
+    
         if st.session_state.model is not None and not st.session_state.live_data.empty:
             pred, conf = predict_signal(st.session_state.model, st.session_state.live_data)
             if pred is not None:
