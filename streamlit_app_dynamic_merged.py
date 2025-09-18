@@ -960,11 +960,7 @@ with tab2:
                 model_bytes = uploaded_model_file.read()
                 st.session_state.model = joblib.load(io.BytesIO(model_bytes))
                 st.success("✅ Connected & model loaded.")
-    
-    # Refresh + process ticks
-    st_autorefresh(interval=2000, key="refresh")
-    process_tick_queue()
-    reconnect_ws()
+
     
     # ---------------- Dashboard ----------------
     if not st.session_state.live_data.empty:
