@@ -1013,12 +1013,6 @@ with tab2:
     # Process incoming ticks into session_state (main thread)
     process_tick_queue()
 
-    st.subheader("📡 Raw Tick JSON Preview")
-    if "raw_ticks" in st.session_state and st.session_state.raw_ticks:
-        st.json(st.session_state.raw_ticks[-5:])  # show last 5 ticks as JSON
-    else:
-        st.info("No raw tick JSON yet...")
-    
     # If we have data show the dashboard, else placeholder
     if not st.session_state.live_data.empty:
         latest_price = st.session_state.live_data["last_traded_price"].iloc[-1]
