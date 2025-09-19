@@ -797,13 +797,6 @@ with tab2:
             st.session_state[k] = v
     
     
-    # ---------------- UI Logging ----------------
-    def ui_log(msg):
-        ts = datetime.datetime.now().strftime("%H:%M:%S")
-        logger.info(msg)
-        st.write(f"{ts} - {msg}")
-    
-    
     # ---------------- Breeze Setup ----------------
     def setup_breeze(session_token):
         try:
@@ -880,29 +873,29 @@ with tab2:
         )
     
     
-    # ---------------- Raw Tick Capture ----------------
-    def capture_raw_ticks(ticks):
-        """Keep last 10 raw ticks for UI preview"""
-        st.session_state.last_ticks.append(ticks)
-        if len(st.session_state.last_ticks) > 10:
-            st.session_state.last_ticks = st.session_state.last_ticks[-10:]
-    
-    
     # ---------------- WebSocket ----------------
     def on_ticks(ticks):
         """Background thread callback → enqueue ticks and log raw data"""
         tick_queue.put(ticks)
-        capture_raw_ticks(ticks)  # Save for UI preview
-        logger.info(f"Received raw tick: {ticks}")  # Full log
+        logger.info(f"Received raw tick: {ticks}")  # Only log here
     
     
     def process_tick_queue():
         processed_rows = 0
         while not tick_queue.empty():
             ticks = tick_queue.get()
+    
+            # ✅ Update raw tick preview in Streamlit thread
+            st.session_state.last_ticks.append(ticks)
+            if len(st.session_state.last_ticks) > 10:
+                st.session_state.last_ticks = st.session_state.last_ticks[-10:]
+    
+            # ---------------- Normalization ----------------
             new_rows = []
             if isinstance(ticks, list):
                 for t in ticks:
+                    if not isinstance(t, dict):
+                        continue
                     row = {
                         "timestamp": pd.to_datetime(
                             t.get("exchange_time", pd.Timestamp.now()), utc=True
@@ -982,7 +975,7 @@ with tab2:
                     if stock_token.strip():
                         breeze.subscribe_feeds(
                             stock_token=stock_token.strip(),
-                            get_market_depth=True,  # ✅ enabled
+                            get_market_depth=True,
                             get_exchange_quotes=True,
                         )
                     elif stock_code.strip():
@@ -990,7 +983,7 @@ with tab2:
                             exchange_code=exchange_code,
                             stock_code=stock_code,
                             product_type="cash",
-                            get_market_depth=True,  # ✅ enabled
+                            get_market_depth=True,
                             get_exchange_quotes=True,
                         )
                     else:
