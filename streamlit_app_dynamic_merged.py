@@ -761,7 +761,7 @@ with tab1:
                 st.info("No intraday trades data available to display outlier trades.")
 
 with tab2:
-
+    
     MAX_WINDOW_SIZE = 150
     
     RAW_API_KEY = "=4c730660p24@d03%65343MG909o217L"
@@ -796,10 +796,7 @@ with tab2:
             st.session_state[k] = v
     
     def ui_log(msg):
-        """Log messages both in UI and log file"""
-        if "ui_logs" not in st.session_state:   # ✅ Safe init
-            st.session_state.ui_logs = []
-    
+        """Append logs to UI + logger (safe inside main thread only)"""
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         entry = f"{timestamp} - {msg}"
         st.session_state.ui_logs.append(entry)
@@ -808,14 +805,14 @@ with tab2:
     # ---------------- Breeze Setup ----------------
     def setup_breeze(session_token):
         try:
-            ui_log(f"Using API Key: {API_KEY}")
+            logger.info(f"Using API Key: {API_KEY}")
             breeze = BreezeConnect(api_key=API_KEY)
             breeze.generate_session(api_secret=API_SECRET, session_token=session_token)
             st.success("✅ BreezeConnect session generated successfully.")
             return breeze
         except Exception as e:
             st.error(f"BreezeConnect session error: {e}")
-            ui_log(f"BreezeConnect session error: {e}")
+            logger.error(f"BreezeConnect session error: {e}")
             return None
     
     # ---------------- Indicators ----------------
@@ -872,12 +869,9 @@ with tab2:
     tick_queue = queue.Queue()
     
     def on_ticks(ticks):
-        """Callback runs in Breeze thread → enqueue safely"""
+        """Background thread callback → only enqueue, never touch st.session_state"""
         tick_queue.put(ticks)
-        ui_log(f"Enqueued {len(ticks) if isinstance(ticks, list) else 1} ticks.")
-        st.session_state.raw_ticks.append(ticks)
-        if len(st.session_state.raw_ticks) > 10:
-            st.session_state.raw_ticks.pop(0)
+        logger.info(f"Enqueued {len(ticks) if isinstance(ticks, list) else 1} ticks.")
     
     def process_tick_queue():
         processed_rows = 0
