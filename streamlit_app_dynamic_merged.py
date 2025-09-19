@@ -761,7 +761,7 @@ with tab1:
                 st.info("No intraday trades data available to display outlier trades.")
 
 with tab2:
-    
+
     MAX_WINDOW_SIZE = 150
     
     RAW_API_KEY = "=4c730660p24@d03%65343MG909o217L"
@@ -797,6 +797,9 @@ with tab2:
     
     def ui_log(msg):
         """Log messages both in UI and log file"""
+        if "ui_logs" not in st.session_state:   # ✅ Safe init
+            st.session_state.ui_logs = []
+    
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         entry = f"{timestamp} - {msg}"
         st.session_state.ui_logs.append(entry)
