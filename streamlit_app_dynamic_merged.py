@@ -766,7 +766,7 @@ with tab2:
     st.title("📊 Live Trading Dashboard")
     
     # ---------------- Constants ----------------
-    MAX_WINDOW_SIZE = 150            # rolling window for in-memory charting
+    MAX_WINDOW_SIZE = 15000            # rolling window for in-memory charting
     RENDER_LOOP_SECONDS = 20         # how long each live render loop runs per run
     RENDER_SLEEP_SEC = 1.0           # refresh interval within the loop
     FEATURES = ['ema_20', 'ema_50', 'ATR', 'RSI']
