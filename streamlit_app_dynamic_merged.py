@@ -938,8 +938,8 @@ with tab2:
     # ---------------- Connection Settings ----------------
     with st.expander("🔑 Connection Settings", expanded=True):
         # Prefer secrets; fall back to user inputs
-        api_key = st.secrets.get("breeze_api_key", os.getenv("BREEZE_API_KEY", ""))
-        api_secret = st.secrets.get("breeze_api_secret", os.getenv("BREEZE_API_SECRET", ""))
+        api_key = st.secrets.get("=4c730660p24@d03%65343MG909o217L", os.getenv("BREEZE_API_KEY", ""))
+        api_secret = st.secrets.get("416D2gJdy064P7F7)s5e590J8I1692~7", os.getenv("BREEZE_API_SECRET", ""))
         if not api_key or not api_secret:
             st.info("Tip: set keys in `.streamlit/secrets.toml` as `breeze_api_key` and `breeze_api_secret`.")
     
