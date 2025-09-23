@@ -937,15 +937,9 @@ with tab2:
     
     # ---------------- Connection Settings ----------------
     with st.expander("🔑 Connection Settings", expanded=True):
-        # Prefer secrets; fall back to user inputs
-        api_key = st.secrets.get("breeze_api_key", os.getenv("=4c730660p24@d03%65343MG909o217L", ""))
-        api_secret = st.secrets.get("breeze_api_secret", os.getenv("416D2gJdy064P7F7)s5e590J8I1692~7", ""))
-        if not api_key or not api_secret:
-            st.info("Tip: set keys in `.streamlit/secrets.toml` as `breeze_api_key` and `breeze_api_secret`.")
-    
-        api_key = st.text_input("API Key", value=api_key or "", type="password")
-        api_secret = st.text_input("API Secret", value=api_secret or "", type="password")
-    
+        api_key = "=4c730660p24@d03%65343MG909o217L"
+        api_secret = "416D2gJdy064P7F7)s5e590J8I1692~7"    
+        
         session_token = st.text_input("Session Token", type="password")
         exchange_code = st.text_input("Exchange Code (e.g., NSE)")
         stock_code = st.text_input("Stock Code (e.g., NIFTY 50)")
