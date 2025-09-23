@@ -21,6 +21,7 @@ import ta
 import joblib
 import time
 import io
+from typing import List, Dict, Any
 
 st.set_page_config(layout="wide")
 st.markdown("""
@@ -762,15 +763,17 @@ with tab1:
 
 with tab2:
 
-    st.title("📊 Live Trading Dashboard")
+    st.markdown(
+        """
+        <div style='display:flex;align-items:center;gap:12px'>
+          <img src='https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/React-icon.svg/512px-React-icon.svg.png' width='40'>
+          <h2 style='margin:0'>📊 Live Trading Dashboard</h2>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
     
-    # ---------------- Constants ----------------
-    MAX_WINDOW_SIZE = 150            # rolling window for in-memory charting
-    RENDER_LOOP_SECONDS = 20         # how long each live render loop runs per run
-    RENDER_SLEEP_SEC = 1.0           # refresh interval within the loop
-    FEATURES = ['ema_20', 'ema_50', 'ATR', 'RSI']
-    
-    # ---------------- Logging ----------------
+    # --------------------------- Logging ---------------------------
     logger = logging.getLogger("LiveTradingLogger")
     logger.setLevel(logging.INFO)
     if not logger.handlers:
@@ -779,45 +782,50 @@ with tab2:
         fh.setFormatter(fmt)
         logger.addHandler(fh)
     
-    # ---------------- Thread-safe tick queue ----------------
-    tick_queue = queue.Queue()
+    # --------------------------- Thread-safe tick queue ---------------------------
+    tick_queue: "queue.Queue[List[Dict[str, Any]]]" = queue.Queue()
     
-    # ---------------- Session State Defaults ----------------
+    # --------------------------- Session State Defaults ---------------------------
     defaults = {
-        "live_data": pd.DataFrame(),
-        "position": None,            # {"entry_price": float, "entry_time": ts}
-        "trades": [],                # list of {entry_price, exit_price, entry_time, exit_time, pnl}
-        "equity_curve": [],          # list of {timestamp, total_pnl}
-        "model": None,
-        "breeze": None,
-        "last_ticks": []
+        "all_ticks": pd.DataFrame(),     # FULL history of ticks
+        "live_data": pd.DataFrame(),     # mirror of all_ticks for charts
+        "position": None,                # {"entry_price": float, "entry_time": ts}
+        "trades": [],                    # list of {entry_price, exit_price, entry_time, exit_time, pnl}
+        "equity_curve": [],              # list of {timestamp, total_pnl}
+        "model": None,                   # optional ML model
+        "breeze": None,                  # BreezeConnect instance
+        "last_ticks": []                 # raw preview buffer
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
     
-    # ---------------- Utils ----------------
+    # --------------------------- Indicator Config ---------------------------
+    FEATURES = ["ema_20", "ema_50", "ATR", "RSI"]
+    
+    # --------------------------- Utility Functions ---------------------------
     def calculate_indicators_live(df: pd.DataFrame) -> pd.DataFrame:
         """
-        Compute EMA20, EMA50, ATR (on LTP proxy), RSI on the cleaned, time-sorted DF.
+        Compute EMA20, EMA50, ATR (using LTP proxy), RSI on the cleaned, time-sorted DF.
         """
         if df.empty or len(df) < 20:
             return df
     
         work = df.copy()
         work = work.set_index("timestamp")
-        price = work['last_traded_price']
+        price = work["last_traded_price"]
     
-        work['ema_20'] = ta.trend.ema_indicator(price, window=20)
-        work['ema_50'] = ta.trend.ema_indicator(price, window=50)
-        # ATR proxy using LTP for H/L/C (we don't have real OHLC per tick)
-        work['ATR'] = ta.volatility.average_true_range(
+        work["ema_20"] = ta.trend.ema_indicator(price, window=20)
+        work["ema_50"] = ta.trend.ema_indicator(price, window=50)
+    
+        # ATR proxy (we don't have true OHLC per tick, so we use LTP for all three)
+        work["ATR"] = ta.volatility.average_true_range(
             high=price, low=price, close=price, window=14
         )
-        work['RSI'] = ta.momentum.rsi(price, window=14)
+        work["RSI"] = ta.momentum.rsi(price, window=14)
     
-        work = work.reset_index()
-        return work
+        return work.reset_index()
+    
     
     def predict_signal(model, df: pd.DataFrame):
         """
@@ -833,152 +841,190 @@ with tab2:
             return None, None
     
         latest = latest.iloc[-1:][FEATURES]
+        # If model lacks predict_proba, use a dummy confidence
+        if hasattr(model, "predict_proba"):
+            proba = float(model.predict_proba(latest).max())
+        else:
+            proba = 1.0
         pred = model.predict(latest)[0]
-        proba = float(getattr(model, "predict_proba", lambda X: np.array([[0, 1.0]]))(latest).max())
         return pred, proba
+    
     
     def update_trades(signal, price, timestamp):
         """
-        Basic long-only toggle: 1 = open if flat; -1 = close if open.
-        Tracks equity curve from realized + open PnL.
+        Simple long-only toggle:
+        - signal == 1 → open if flat
+        - signal == -1 → close if open
+        Tracks equity curve = realized + open PnL
         """
         pos = st.session_state.position
     
         if signal == 1 and pos is None:
-            st.session_state.position = {"entry_price": price, "entry_time": timestamp}
+            st.session_state.position = {"entry_price": float(price), "entry_time": timestamp}
             logger.info(f"Opened position at {price} on {timestamp}")
     
         elif signal == -1 and pos is not None:
-            pnl = price - pos["entry_price"]
+            pnl = float(price) - float(pos["entry_price"])
             trade_record = {
-                "entry_price": pos["entry_price"],
-                "exit_price": price,
+                "entry_price": float(pos["entry_price"]),
+                "exit_price": float(price),
                 "entry_time": pos["entry_time"],
                 "exit_time": timestamp,
-                "pnl": pnl,
+                "pnl": float(pnl),
             }
             st.session_state.trades.append(trade_record)
             st.session_state.position = None
             logger.info(f"Closed position at {price} on {timestamp} | PnL {pnl:.2f}")
     
         # Equity tracking (realized + open)
-        total_pnl = sum(t['pnl'] for t in st.session_state.trades)
+        total_pnl = float(sum(t["pnl"] for t in st.session_state.trades))
         if st.session_state.position is not None:
-            total_pnl += (price - st.session_state.position["entry_price"])
+            total_pnl += float(price) - float(st.session_state.position["entry_price"])
         st.session_state.equity_curve.append({"timestamp": timestamp, "total_pnl": total_pnl})
+    
     
     def on_ticks(ticks):
         """
-        Breeze websocket callback. Just enqueue ticks; do not touch Streamlit widgets here.
+        Breeze websocket callback. Enqueue ticks; avoid touching Streamlit widgets here.
         """
         tick_queue.put(ticks)
+        # Keep a short preview buffer
+        st.session_state.last_ticks.append(ticks)
+        if len(st.session_state.last_ticks) > 10:
+            st.session_state.last_ticks = st.session_state.last_ticks[-10:]
         logger.info(f"Received raw tick: {ticks}")
+    
+    
+    def normalize_ticks_to_df(ticks_payload) -> pd.DataFrame:
+        """
+        Normalize various Breeze tick shapes to a DataFrame with columns:
+        timestamp, last_traded_price, volume
+        """
+        rows = []
+    
+        if isinstance(ticks_payload, list):
+            iterable = ticks_payload
+        else:
+            iterable = [ticks_payload]
+    
+        for t in iterable:
+            # Try common keys; fallback to now/NaN
+            ltt = t.get("ltt") or t.get("exchange_time") or pd.Timestamp.utcnow()
+            ltp = (
+                t.get("last")
+                or t.get("last_traded_price")
+                or t.get("ltp")
+                or t.get("lastPrice")
+                or np.nan
+            )
+            vol = t.get("volume") or t.get("ltq") or t.get("totalTradedVolume") or np.nan
+    
+            rows.append({
+                "timestamp": pd.to_datetime(ltt, errors="coerce"),
+                "last_traded_price": pd.to_numeric(ltp, errors="coerce"),
+                "volume": pd.to_numeric(vol, errors="coerce")
+            })
+    
+        df = pd.DataFrame(rows)
+        df = df.dropna(subset=["timestamp", "last_traded_price"])
+        return df
+    
     
     def process_tick_queue():
         """
-        Drain the queue -> append to live_data -> clean types -> trim window -> compute indicators -> maybe generate signal.
+        Drain the queue -> append to all_ticks -> clean/sort -> compute indicators -> mirror to live_data
         """
-        processed_rows = 0
+        appended = False
         while not tick_queue.empty():
-            ticks = tick_queue.get()
-            st.session_state.last_ticks.append(ticks)
-            if len(st.session_state.last_ticks) > 10:
-                st.session_state.last_ticks = st.session_state.last_ticks[-10:]
-    
-            new_rows = []
-            # Normalize list/dict payloads from the feed
-            if isinstance(ticks, list):
-                it = ticks
-            else:
-                it = [ticks]
-    
-            for t in it:
-                ltt = t.get("ltt", pd.Timestamp.utcnow())  # last traded time or now
-                ltp = (
-                    t.get("last")
-                    or t.get("last_traded_price")
-                    or t.get("ltp")
-                    or t.get("lastPrice")
-                    or np.nan
+            payload = tick_queue.get()
+            new_df = normalize_ticks_to_df(payload)
+            if not new_df.empty:
+                st.session_state.all_ticks = pd.concat(
+                    [st.session_state.all_ticks, new_df], ignore_index=True
                 )
-                vol = t.get("volume") or t.get("ltq") or np.nan
-                new_rows.append(
-                    {"timestamp": pd.to_datetime(ltt, errors="coerce"),
-                     "last_traded_price": pd.to_numeric(ltp, errors="coerce"),
-                     "volume": pd.to_numeric(vol, errors="coerce")}
-                )
+                appended = True
     
-            if new_rows:
-                new_df = pd.DataFrame(new_rows)
-                # drop rows missing critical fields
-                new_df = new_df.dropna(subset=["timestamp", "last_traded_price"])
-                if not new_df.empty:
-                    st.session_state.live_data = pd.concat(
-                        [st.session_state.live_data, new_df], ignore_index=True
-                    )
-                    processed_rows += len(new_df)
+        if appended:
+            df_all = st.session_state.all_ticks
     
-        if processed_rows > 0:
-            # keep only the latest MAX_WINDOW_SIZE and sort by time
-            df = st.session_state.live_data
-            df = df.dropna(subset=["timestamp", "last_traded_price"])
-            df = df.sort_values("timestamp").tail(MAX_WINDOW_SIZE).reset_index(drop=True)
-            df = calculate_indicators_live(df)
-            st.session_state.live_data = df
+            # Clean, sort, and deduplicate (avoid jittery draws)
+            df_all["timestamp"] = pd.to_datetime(df_all["timestamp"], errors="coerce")
+            df_all["last_traded_price"] = pd.to_numeric(df_all["last_traded_price"], errors="coerce")
+            df_all["volume"] = pd.to_numeric(df_all["volume"], errors="coerce")
     
-            # ML signal (if model is loaded)
-            if st.session_state.model is not None and not df.empty:
-                pred, conf = predict_signal(st.session_state.model, df)
+            df_all = df_all.dropna(subset=["timestamp", "last_traded_price"])
+            df_all = df_all.sort_values("timestamp").drop_duplicates(
+                subset=["timestamp", "last_traded_price", "volume"], keep="last"
+            ).reset_index(drop=True)
+    
+            # Compute indicators on the full set (no trimming)
+            df_all = calculate_indicators_live(df_all)
+    
+            # Save back
+            st.session_state.all_ticks = df_all
+            st.session_state.live_data = df_all.copy()
+    
+            # ML signal on latest row
+            if st.session_state.model is not None and not df_all.empty:
+                pred, conf = predict_signal(st.session_state.model, df_all)
                 if pred is not None:
-                    latest_price = float(df["last_traded_price"].iloc[-1])
-                    latest_timestamp = pd.to_datetime(df["timestamp"].iloc[-1])
+                    latest_price = float(df_all["last_traded_price"].iloc[-1])
+                    latest_timestamp = pd.to_datetime(df_all["timestamp"].iloc[-1])
                     update_trades(pred, latest_price, latest_timestamp)
     
-    # ---------------- Connection Settings ----------------
+    
+    # --------------------------- Connection Settings ---------------------------
     with st.expander("🔑 Connection Settings", expanded=True):
-        # Prefer secrets; fall back to user inputs
-        api_key = st.secrets.get("breeze_api_key", os.getenv("BREEZE_API_KEY", ""))
-        api_secret = st.secrets.get("breeze_api_secret", os.getenv("BREEZE_API_SECRET", ""))
-        if not api_key or not api_secret:
+        # Prefer Streamlit secrets; fallback to env; finally user input.
+        api_key_default = st.secrets.get("breeze_api_key", os.getenv("BREEZE_API_KEY", ""))
+        api_secret_default = st.secrets.get("breeze_api_secret", os.getenv("BREEZE_API_SECRET", ""))
+    
+        if not api_key_default or not api_secret_default:
             st.info("Tip: set keys in `.streamlit/secrets.toml` as `breeze_api_key` and `breeze_api_secret`.")
     
-        api_key = st.text_input("API Key", value=api_key or "", type="password")
-        api_secret = st.text_input("API Secret", value=api_secret or "", type="password")
+        api_key = st.text_input("API Key", value=api_key_default or "", type="password")
+        api_secret = st.text_input("API Secret", value=api_secret_default or "", type="password")
     
-        session_token = st.text_input("Session Token", type="password")
-        exchange_code = st.text_input("Exchange Code (e.g., NSE)")
-        stock_code = st.text_input("Stock Code (e.g., NIFTY 50)")
-        stock_token = st.text_input("Stock Token (optional)", value="")
-        uploaded_model_file = st.file_uploader("Upload ML Model (.pkl)", type=["pkl"])
+        session_token = st.text_input("Session Token", type="password", help="Obtain from Breeze auth flow.")
+        exchange_code = st.text_input("Exchange Code", value="NSE", help="e.g., NSE")
+        stock_code = st.text_input("Stock Code", value="", help="e.g., RELIANCE, NIFTY 50")
+        stock_token = st.text_input("Stock Token (optional)", value="", help="If provided, subscription uses token directly")
+    
+        uploaded_model_file = st.file_uploader("Upload ML Model (.pkl, optional)", type=["pkl"])
     
         col_conn1, col_conn2 = st.columns([1, 1])
         with col_conn1:
             connect_pressed = st.button("🚀 Connect & Subscribe")
         with col_conn2:
-            run_live = st.toggle("🔁 Auto-update charts (keeps refreshing for ~20s cycles)", value=True)
+            run_live = st.toggle("🔁 Auto-refresh (1s)", value=True)
     
-    # ---------------- Connect & Subscribe ----------------
+    # Enable periodic autorefresh when live
+    if run_live:
+        st.autorefresh(interval=1000, key="live_autorefresh")
+    
+    # --------------------------- Connect & Subscribe ---------------------------
     if connect_pressed:
-        if not (api_key and api_secret and session_token and exchange_code):
-            st.error("⚠️ Please provide API key, API secret, session token, and exchange code.")
-        elif uploaded_model_file is None:
-            st.error("⚠️ Upload your ML model file first (.pkl).")
+        if not (api_key and api_secret and session_token and (stock_token.strip() or stock_code.strip()) and exchange_code):
+            st.error("⚠️ Provide API key, API secret, session token, exchange, and either Stock Code or Stock Token.")
         else:
             try:
                 breeze = BreezeConnect(api_key=api_key)
-                # Set callback BEFORE connecting/subscribing so we don't miss the first payload
+    
+                # Set callback BEFORE connecting/subscribing to avoid missing initial ticks
                 breeze.on_ticks = on_ticks
+    
+                # Create session & ws connect
                 breeze.generate_session(api_secret=api_secret, session_token=session_token)
                 breeze.ws_connect()
     
-                # Subscribe using token OR (exchange + stock_code)
+                # Subscribe
                 if stock_token.strip():
                     breeze.subscribe_feeds(
                         stock_token=stock_token.strip(),
                         get_market_depth=True,
                         get_exchange_quotes=True
                     )
-                elif stock_code.strip():
+                else:
                     breeze.subscribe_feeds(
                         exchange_code=exchange_code,
                         stock_code=stock_code.strip(),
@@ -986,24 +1032,27 @@ with tab2:
                         get_market_depth=True,
                         get_exchange_quotes=True
                     )
-                else:
-                    st.error("⚠️ Provide either Stock Code or Stock Token to subscribe.")
-                    raise ValueError("No instrument provided")
     
                 st.session_state.breeze = breeze
     
-                # Load model
-                model_bytes = uploaded_model_file.read()
-                st.session_state.model = joblib.load(io.BytesIO(model_bytes))
-                st.success("✅ Connected, subscribed & model loaded.")
-                logger.info("Connected & subscribed successfully.")
+                # Optional model
+                if uploaded_model_file is not None:
+                    model_bytes = uploaded_model_file.read()
+                    st.session_state.model = joblib.load(io.BytesIO(model_bytes))
+                    st.success("✅ Connected, subscribed, and model loaded.")
+                    logger.info("Connected, subscribed, model loaded.")
+                else:
+                    st.success("✅ Connected & subscribed (no ML model loaded).")
+                    logger.info("Connected & subscribed (no model).")
+    
             except Exception as e:
                 st.error(f"Connection error: {e}")
                 logger.error(f"Connection error: {e}")
     
-    # ---------------- Placeholders for dynamic UI ----------------
+    # --------------------------- UI Placeholders ---------------------------
     ph_metrics = st.empty()
-    ph_price_vol = st.empty()
+    ph_price = st.empty()
+    ph_volume = st.empty()
     ph_ema = st.empty()
     ph_rsi = st.empty()
     ph_atr = st.empty()
@@ -1012,71 +1061,106 @@ with tab2:
     ph_trades = st.empty()
     ph_equity = st.empty()
     
+    # --------------------------- Render Loop (Single Pass) ---------------------------
     def render_dashboard_once():
-        """
-        One pass: drain queue, recompute indicators/signals, and rerender all UI placeholders.
-        """
+        # Drain new ticks and rebuild live_data
         process_tick_queue()
     
         df = st.session_state.live_data.copy()
         if df.empty:
-            ph_table.info("⚙️ Connect with valid credentials and wait for live ticks...")
+            with ph_table.container():
+                st.info("⚙️ Connect with valid credentials and wait for live ticks…")
             return
     
-        # strict typing & sorting (safety for charts)
+        # Ensure correct dtypes and ordering
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
         df["last_traded_price"] = pd.to_numeric(df["last_traded_price"], errors="coerce")
         df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
         df = df.dropna(subset=["timestamp", "last_traded_price"]).sort_values("timestamp")
+    
         if df.empty:
-            ph_table.info("Awaiting valid price ticks...")
+            with ph_table.container():
+                st.info("Awaiting valid price ticks…")
             return
     
         latest_price = float(df["last_traded_price"].iloc[-1])
         open_pnl = 0.0
-        if st.session_state.position:
+        if st.session_state.position is not None:
             open_pnl = latest_price - float(st.session_state.position["entry_price"])
-        total_pnl = float(sum(t['pnl'] for t in st.session_state.trades))
+        total_pnl = float(sum(t["pnl"] for t in st.session_state.trades))
     
-        # --- metrics row ---
+        # ---------------- Top Metrics ----------------
         with ph_metrics.container():
             c1, c2, c3 = st.columns(3)
             c1.metric("📈 Last Price", f"₹{latest_price:.2f}")
             c2.metric("💰 Open PnL", f"{open_pnl:.2f}")
             c3.metric("📊 Total PnL", f"{total_pnl:.2f}")
     
-        # --- charts ---
-        with ph_price_vol.container():
-            st.subheader("📉 Price & Volume")
-            st.line_chart(df.set_index("timestamp")[["last_traded_price", "volume"]])
+        # ---------------- Price (line) ----------------
+        with ph_price.container():
+            st.subheader("📉 Price")
+            fig_price = go.Figure()
+            fig_price.add_trace(go.Scatter(
+                x=df["timestamp"], y=df["last_traded_price"],
+                mode="lines", name="Price"
+            ))
+            fig_price.update_layout(
+                margin=dict(l=0, r=10, t=30, b=0),
+                xaxis_title="Time", yaxis_title="Price"
+            )
+            st.plotly_chart(fig_price, use_container_width=True)
     
+        # ---------------- Volume (separate) ----------------
+        with ph_volume.container():
+            st.subheader("🔊 Volume")
+            fig_vol = go.Figure()
+            fig_vol.add_trace(go.Bar(x=df["timestamp"], y=df["volume"], name="Volume"))
+            fig_vol.update_layout(
+                margin=dict(l=0, r=10, t=30, b=0),
+                xaxis_title="Time", yaxis_title="Volume"
+            )
+            st.plotly_chart(fig_vol, use_container_width=True)
+    
+        # ---------------- EMAs ----------------
         if {"ema_20", "ema_50"}.issubset(df.columns):
             with ph_ema.container():
                 st.subheader("📍 EMA 20 & EMA 50")
-                st.line_chart(df.set_index("timestamp")[["ema_20", "ema_50"]])
+                fig_ema = go.Figure()
+                fig_ema.add_trace(go.Scatter(x=df["timestamp"], y=df["ema_20"], mode="lines", name="EMA 20"))
+                fig_ema.add_trace(go.Scatter(x=df["timestamp"], y=df["ema_50"], mode="lines", name="EMA 50"))
+                fig_ema.update_layout(margin=dict(l=0, r=10, t=30, b=0), xaxis_title="Time", yaxis_title="EMA")
+                st.plotly_chart(fig_ema, use_container_width=True)
         else:
             ph_ema.empty()
     
+        # ---------------- RSI ----------------
         if "RSI" in df.columns:
             with ph_rsi.container():
                 st.subheader("🔄 RSI")
-                st.line_chart(df.set_index("timestamp")[["RSI"]])
+                fig_rsi = go.Figure()
+                fig_rsi.add_trace(go.Scatter(x=df["timestamp"], y=df["RSI"], mode="lines", name="RSI"))
+                fig_rsi.update_layout(margin=dict(l=0, r=10, t=30, b=0), xaxis_title="Time", yaxis_title="RSI")
+                st.plotly_chart(fig_rsi, use_container_width=True)
         else:
             ph_rsi.empty()
     
+        # ---------------- ATR ----------------
         if "ATR" in df.columns:
             with ph_atr.container():
                 st.subheader("📊 ATR")
-                st.line_chart(df.set_index("timestamp")[["ATR"]])
+                fig_atr = go.Figure()
+                fig_atr.add_trace(go.Scatter(x=df["timestamp"], y=df["ATR"], mode="lines", name="ATR"))
+                fig_atr.update_layout(margin=dict(l=0, r=10, t=30, b=0), xaxis_title="Time", yaxis_title="ATR")
+                st.plotly_chart(fig_atr, use_container_width=True)
         else:
             ph_atr.empty()
     
-        # --- Data snapshot ---
+        # ---------------- Data Snapshot ----------------
         with ph_table.container():
-            st.subheader("📝 Latest Data")
-            st.dataframe(df.tail(10))
+            st.subheader("📝 Latest Data (last 15)")
+            st.dataframe(df.tail(15))
     
-        # --- Position & Trades ---
+        # ---------------- Position & Trades ----------------
         with ph_pos.container():
             if st.session_state.position:
                 st.info(
@@ -1091,38 +1175,44 @@ with tab2:
                 st.subheader("📑 Closed Trades")
                 st.dataframe(pd.DataFrame(st.session_state.trades))
     
-        # --- Equity Curve ---
+        # ---------------- Equity Curve ----------------
         with ph_equity.container():
             if st.session_state.equity_curve:
                 st.subheader("📈 Equity Curve (Total PnL)")
                 eq_df = pd.DataFrame(st.session_state.equity_curve)
                 eq_df["timestamp"] = pd.to_datetime(eq_df["timestamp"], errors="coerce")
                 eq_df = eq_df.dropna(subset=["timestamp"]).sort_values("timestamp")
-                st.line_chart(eq_df.set_index("timestamp")["total_pnl"])
+                fig_eq = go.Figure()
+                fig_eq.add_trace(go.Scatter(x=eq_df["timestamp"], y=eq_df["total_pnl"], mode="lines", name="Total PnL"))
+                fig_eq.update_layout(margin=dict(l=0, r=10, t=30, b=0), xaxis_title="Time", yaxis_title="PnL")
+                st.plotly_chart(fig_eq, use_container_width=True)
     
-    # ---------------- Live render loop ----------------
-    if run_live:
-        start = time.time()
-        while True:
-            render_dashboard_once()
-            time.sleep(RENDER_SLEEP_SEC)
-            # Stop after a short burst so Streamlit can yield control & you can toggle again on next run
-            if time.time() - start > RENDER_LOOP_SECONDS:
-                break
-    else:
-        render_dashboard_once()
     
-    # ---------------- Raw ticks preview & logs ----------------
-    st.subheader("🟢 Raw Tick Preview (last 10)")
+    # --------------------------- Draw Once Per Run (autorefresh handles the loop) ---------------------------
+    render_dashboard_once()
+    
+    # --------------------------- Raw ticks preview & logs ---------------------------
+    st.subheader("🟢 Raw Tick Preview (last 10 payloads)")
     if st.session_state.last_ticks:
         st.json(st.session_state.last_ticks)
     else:
-        st.write("⚙️ Waiting for ticks...")
+        st.write("⚙️ Waiting for ticks…")
     
-    if st.button("📥 Download Logs"):
-        try:
-            with open("live_trading.log", "r") as f:
-                log_contents = f.read()
-            st.download_button("Download log file", log_contents, "live_trading.log", "text/plain")
-        except Exception as e:
-            st.error(f"Log read error: {e}")
+    col_d1, col_d2 = st.columns([1, 1])
+    with col_d1:
+        if st.button("📥 Download Logs"):
+            try:
+                with open("live_trading.log", "r") as f:
+                    log_contents = f.read()
+                st.download_button("Download log file", log_contents, "live_trading.log", "text/plain")
+            except Exception as e:
+                st.error(f"Log read error: {e}")
+    with col_d2:
+        if st.button("🧹 Clear In-Memory Data"):
+            st.session_state.all_ticks = pd.DataFrame()
+            st.session_state.live_data = pd.DataFrame()
+            st.session_state.position = None
+            st.session_state.trades = []
+            st.session_state.equity_curve = []
+            st.session_state.last_ticks = []
+            st.success("Cleared in-memory data.")
