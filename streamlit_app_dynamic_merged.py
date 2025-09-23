@@ -1001,7 +1001,7 @@ with tab2:
     
     # Enable periodic autorefresh when live
     if run_live:
-        st.autorefresh(interval=1000, key="live_autorefresh")
+        st_autorefresh(interval=1000, key="live_autorefresh")
     
     # --------------------------- Connect & Subscribe ---------------------------
     if connect_pressed:
