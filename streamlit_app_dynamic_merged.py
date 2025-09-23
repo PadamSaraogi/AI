@@ -5,6 +5,7 @@ import numpy as np
 import urllib.parse
 import seaborn as sns
 from urllib.parse import quote_plus
+from streamlit_autorefresh import st_autorefresh
 from queue import Queue
 import logging
 import streamlit.components.v1 as components
