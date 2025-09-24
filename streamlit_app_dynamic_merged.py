@@ -779,8 +779,8 @@ with tab2:
         fh.setFormatter(fmt)
         logger.addHandler(fh)
 
-    # ---------------- Global queue (thread-safe, not in st.session_state) ----------------
-    # Persist across reruns via module attribute so background thread keeps the same queue.
+    # ---------------- Global queue (thread-safe, NOT in Streamlit state) ----------------
+    # Persist across reruns via module attribute so the background thread keeps the same queue.
     GLOBAL_TICK_QUEUE = getattr(sys.modules[__name__], "GLOBAL_TICK_QUEUE", None)
     if GLOBAL_TICK_QUEUE is None:
         GLOBAL_TICK_QUEUE = queue.Queue()
@@ -818,6 +818,39 @@ with tab2:
         except Exception:
             return pd.NaT
 
+    # Try many keys and fallback to arrival time if needed
+    def _extract_ts_and_price(t):
+        """
+        Return (timestamp: pd.Timestamp|NaT, ltp: float|nan).
+        Tries many timestamp fields; falls back to high-res arrival time to keep points distinct.
+        """
+        ts_raw = (
+            t.get("ltt")
+            or t.get("exchange_time")
+            or t.get("last_trade_time")
+            or t.get("trade_time")
+            or t.get("time")
+            or t.get("timestamp")
+            or t.get("datetime")
+            or t.get("created_at")
+            or None
+        )
+        ts = _parse_timestamp(ts_raw)
+        if pd.isna(ts):
+            # fallback: monotonic arrival time (ns) to avoid collapsing multiple ticks
+            ts = pd.to_datetime(time.time_ns(), unit="ns", utc=True, errors="coerce")
+
+        ltp = (
+            t.get("last")
+            or t.get("last_traded_price")
+            or t.get("ltp")
+            or t.get("lastPrice")
+            or t.get("close")
+            or t.get("price")
+            or np.nan
+        )
+        return ts, pd.to_numeric(ltp, errors="coerce")
+
     # ---------------- Feature Engineering ----------------
     def _compute_feature_block(df_ticks: pd.DataFrame) -> pd.DataFrame:
         """
@@ -836,6 +869,7 @@ with tab2:
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
         df = df.dropna(subset=["timestamp", "last_traded_price"]).sort_values("timestamp")
 
+        # 1-minute bars from ticks
         bars = (
             df.set_index("timestamp")
               .resample("1min")
@@ -847,6 +881,7 @@ with tab2:
               .dropna(subset=["open","high","low","close"])
         )
 
+        # Indicators on bars
         try:
             adx = ta.trend.adx(bars["high"], bars["low"], bars["close"], window=14)
             bb  = ta.volatility.BollingerBands(bars["close"], window=20, window_dev=2)
@@ -855,6 +890,7 @@ with tab2:
             adx = pd.Series(index=bars.index, dtype=float)
             bb_width = pd.Series(index=bars.index, dtype=float)
 
+        # 1-hour return on bar close (60 minutes back)
         close_1h_ago = bars["close"].shift(60)
         ret_1h = (bars["close"] / close_1h_ago - 1.0)
 
@@ -864,6 +900,7 @@ with tab2:
             "return_1h": ret_1h,
         }).dropna(how="all").sort_index()
 
+        # As-of merge bar features back to tick timeline
         df = pd.merge_asof(
             df.sort_values("timestamp"),
             bar_features,
@@ -872,8 +909,10 @@ with tab2:
             direction="backward"
         )
 
+        # Hour of day
         df["hour_of_day"] = df["timestamp"].dt.hour.astype("float64")
 
+        # Volume spike ratio on ticks
         vol = pd.to_numeric(df["volume"], errors="coerce")
         rolling_mean = vol.rolling(200, min_periods=20).mean()
         df["volume_spike_ratio"] = (vol / rolling_mean).astype("float64")
@@ -969,7 +1008,8 @@ with tab2:
     # ---------------- Tick processing (main thread) ----------------
     def process_tick_queue():
         """
-        Drain the global queue -> append to live_data -> clean -> trim -> compute indicators -> maybe signal.
+        Drain the global queue -> append to live_data -> clean -> compute indicators -> maybe signal.
+        Uses safe dedup so legitimate same-second ticks are kept.
         """
         processed_rows = 0
         q = GLOBAL_TICK_QUEUE
@@ -983,24 +1023,13 @@ with tab2:
             batch = ticks if isinstance(ticks, list) else [ticks]
             new_rows = []
             for t in batch:
-                ltt = t.get("ltt") or t.get("time") or t.get("timestamp")
-                ts = _parse_timestamp(ltt)
-                ltp = (
-                    t.get("last")
-                    or t.get("last_traded_price")
-                    or t.get("ltp")
-                    or t.get("lastPrice")
-                    or t.get("close")
-                    or np.nan
-                )
+                ts, ltp = _extract_ts_and_price(t)
                 vol = t.get("volume") or t.get("ltq") or t.get("quantity") or np.nan
-                new_rows.append(
-                    {
-                        "timestamp": ts,
-                        "last_traded_price": pd.to_numeric(ltp, errors="coerce"),
-                        "volume": pd.to_numeric(vol, errors="coerce"),
-                    }
-                )
+                new_rows.append({
+                    "timestamp": ts,
+                    "last_traded_price": ltp,
+                    "volume": pd.to_numeric(vol, errors="coerce"),
+                })
 
             if new_rows:
                 new_df = pd.DataFrame(new_rows).dropna(subset=["timestamp", "last_traded_price"])
@@ -1012,13 +1041,29 @@ with tab2:
 
         if processed_rows > 0:
             df = st.session_state.live_data
-            df = df.dropna(subset=["timestamp", "last_traded_price"]).sort_values("timestamp")
-            # if feed emits many ticks with identical timestamps, keep last
-            df = df.drop_duplicates(subset=["timestamp"], keep="last").tail(MAX_WINDOW_SIZE).reset_index(drop=True)
 
+            # Sort and preserve multiple ticks at same second
+            df = df.dropna(subset=["timestamp", "last_traded_price"]).sort_values("timestamp")
+
+            # If same timestamp occurs, micro-bump within group to maintain order
+            dup_mask = df["timestamp"].duplicated(keep=False)
+            if dup_mask.any():
+                df.loc[dup_mask, "ts_rank"] = df.loc[dup_mask].groupby("timestamp").cumcount()
+                df.loc[dup_mask, "timestamp"] = df.loc[dup_mask, "timestamp"] + pd.to_timedelta(df.loc[dup_mask, "ts_rank"], unit="us")
+                df = df.drop(columns=["ts_rank"])
+
+            # Drop only exact consecutive duplicates (same ts & same price)
+            df["prev_ts"] = df["timestamp"].shift(1)
+            df["prev_px"] = df["last_traded_price"].shift(1)
+            df = df[~((df["timestamp"] == df["prev_ts"]) & (df["last_traded_price"] == df["prev_px"]))]
+
+            df = df.tail(MAX_WINDOW_SIZE).reset_index(drop=True)
+
+            # Compute indicators & features
             df = calculate_indicators_live(df)
             st.session_state.live_data = df
 
+            # Model signal
             if st.session_state.model is not None and not df.empty:
                 pred, conf = predict_signal(st.session_state.model, df)
                 if pred is not None:
@@ -1151,20 +1196,20 @@ with tab2:
         else:
             ph_rsi.empty()
 
+        # ATR can be NaN early; guard with dropna
         if "ATR" in df.columns:
             with ph_atr.container():
                 st.subheader("📊 ATR")
-            # ATR may be NaN early; guard with dropna to avoid flat line
-            atr_df = df[["timestamp","ATR"]].dropna()
-            if not atr_df.empty:
-                st.line_chart(atr_df.set_index("timestamp")[["ATR"]])
-            else:
-                ph_atr.info("ATR warming up...")
+                atr_df = df[["timestamp","ATR"]].dropna()
+                if not atr_df.empty:
+                    st.line_chart(atr_df.set_index("timestamp")[["ATR"]])
+                else:
+                    st.info("ATR warming up...")
 
         # --- Data snapshot ---
         with ph_table.container():
             st.subheader("📝 Latest Data")
-            st.dataframe(df.tail(10))
+            st.dataframe(df.tail(20))
 
         # --- Position & Trades ---
         with ph_pos.container():
@@ -1193,12 +1238,16 @@ with tab2:
         # --- Quick diagnostics ---
         st.caption(
             f"Debug — qsize: {GLOBAL_TICK_QUEUE.qsize()} | "
-            f"live rows: {len(st.session_state.live_data)} | "
+            f"rows: {len(st.session_state.live_data)} | "
             f"last ts: {st.session_state.live_data['timestamp'].iloc[-1] if not st.session_state.live_data.empty else '—'}"
         )
+        if st.session_state.last_ticks:
+            sample = st.session_state.last_ticks[-1]
+            sample_one = sample[0] if isinstance(sample, list) and sample else sample
+            if isinstance(sample_one, dict):
+                st.caption(f"Tick keys seen: {sorted(list(sample_one.keys()))[:20]}")
 
     # ---------------- Live render (continuous) ----------------
-    # run_live var is defined by the toggle above (inside expander)
     if 'run_live' in locals() and run_live:
         render_dashboard_once()
         time.sleep(RENDER_SLEEP_SEC)
