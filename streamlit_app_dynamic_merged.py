@@ -1181,7 +1181,7 @@ with tab2:
     if run_live:
         render_dashboard_once()
         time.sleep(RENDER_SLEEP_SEC)
-        st.experimental_rerun()
+        st.rerun()
     else:
         render_dashboard_once()
 
