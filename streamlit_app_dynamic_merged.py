@@ -766,9 +766,8 @@ with tab2:
     st.title("📊 Live Trading Dashboard")
 
     # ---------------- Constants ----------------
-    MAX_WINDOW_SIZE = 15000      # rolling window for in-memory charting
-    RENDER_SLEEP_SEC = 1.0       # refresh interval (seconds)
-    # (No time-boxed loop; we use rerun pattern for continuous updates)
+    MAX_WINDOW_SIZE   = 15000     # rolling window for in-memory charting
+    RENDER_SLEEP_SEC  = 1.0       # refresh interval (seconds)
 
     # ---------------- Logging ----------------
     logger = logging.getLogger("LiveTradingLogger")
@@ -778,9 +777,6 @@ with tab2:
         fmt = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         fh.setFormatter(fmt)
         logger.addHandler(fh)
-
-    # ---------------- Thread-safe tick queue ----------------
-    tick_queue = queue.Queue()
 
     # ---------------- Session State Defaults ----------------
     defaults = {
@@ -795,6 +791,32 @@ with tab2:
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
+
+    # Persist the queue across reruns so the websocket callback and UI stay in sync
+    if "tick_queue" not in st.session_state:
+        st.session_state.tick_queue = queue.Queue()
+
+    # ---------------- Timestamp parsing ----------------
+    def _parse_timestamp(ltt):
+        """
+        Accepts ISO strings, pandas Timestamps, or numeric epoch (ms/s).
+        Returns pandas.Timestamp (UTC) or NaT.
+        """
+        if ltt is None or (isinstance(ltt, float) and np.isnan(ltt)):
+            return pd.NaT
+
+        # Try pandas direct parsing first
+        ts = pd.to_datetime(ltt, errors="coerce", utc=True)
+        if pd.notna(ts):
+            return ts
+
+        # If numeric: detect ms vs s
+        try:
+            x = float(ltt)
+            unit = "ms" if x > 1e10 else "s"  # heuristic threshold
+            return pd.to_datetime(x, unit=unit, utc=True, errors="coerce")
+        except Exception:
+            return pd.NaT
 
     # ---------------- Feature Engineering Helpers ----------------
     def _compute_feature_block(df_ticks: pd.DataFrame) -> pd.DataFrame:
@@ -811,10 +833,10 @@ with tab2:
             return df_ticks
 
         df = df_ticks.copy()
-        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
         df = df.dropna(subset=["timestamp", "last_traded_price"]).sort_values("timestamp")
 
-        # Build 1-minute bars
+        # 1-minute bars from ticks
         bars = (
             df.set_index("timestamp")
               .resample("1min")
@@ -835,7 +857,7 @@ with tab2:
             adx = pd.Series(index=bars.index, dtype=float)
             bb_width = pd.Series(index=bars.index, dtype=float)
 
-        # 1-hour return on bar close
+        # 1-hour return on bar close (60 minutes back)
         close_1h_ago = bars["close"].shift(60)
         ret_1h = (bars["close"] / close_1h_ago - 1.0)
 
@@ -898,7 +920,7 @@ with tab2:
         if model is None or df.empty:
             return None, None
 
-        # Prefer exact training feature order if available
+        # Prefer the exact training feature order if available
         req = list(getattr(model, "feature_names_in_", []))
         if not req:
             # Fallback list (update if your training schema differs)
@@ -951,9 +973,12 @@ with tab2:
     # ---------------- Breeze tick callback ----------------
     def on_ticks(ticks):
         """
-        Breeze websocket callback. Just enqueue ticks; do not touch Streamlit widgets here.
+        Breeze websocket callback. Push to the persistent session_state queue.
         """
-        tick_queue.put(ticks)
+        try:
+            st.session_state.tick_queue.put(ticks, block=False)
+        except Exception:
+            pass
         logger.info(f"Received raw tick: {ticks}")
 
     # ---------------- Tick processing ----------------
@@ -962,34 +987,41 @@ with tab2:
         Drain the queue -> append to live_data -> clean types -> trim window -> compute indicators -> maybe generate signal.
         """
         processed_rows = 0
-        while not tick_queue.empty():
-            ticks = tick_queue.get()
+        q = st.session_state.tick_queue
+
+        while not q.empty():
+            ticks = q.get()
             st.session_state.last_ticks.append(ticks)
             if len(st.session_state.last_ticks) > 10:
                 st.session_state.last_ticks = st.session_state.last_ticks[-10:]
 
+            batch = ticks if isinstance(ticks, list) else [ticks]
             new_rows = []
-            # Normalize list/dict payloads from the feed
-            it = ticks if isinstance(ticks, list) else [ticks]
-            for t in it:
-                ltt = t.get("ltt", pd.Timestamp.utcnow())  # last traded time or now
+            for t in batch:
+                ltt = t.get("ltt") or t.get("time") or t.get("timestamp")
+                ts = _parse_timestamp(ltt)
+
                 ltp = (
                     t.get("last")
                     or t.get("last_traded_price")
                     or t.get("ltp")
                     or t.get("lastPrice")
+                    or t.get("close")
                     or np.nan
                 )
-                vol = t.get("volume") or t.get("ltq") or np.nan
+                vol = t.get("volume") or t.get("ltq") or t.get("quantity") or np.nan
+
                 new_rows.append(
-                    {"timestamp": pd.to_datetime(ltt, errors="coerce"),
-                     "last_traded_price": pd.to_numeric(ltp, errors="coerce"),
-                     "volume": pd.to_numeric(vol, errors="coerce")}
+                    {
+                        "timestamp": ts,
+                        "last_traded_price": pd.to_numeric(ltp, errors="coerce"),
+                        "volume": pd.to_numeric(vol, errors="coerce"),
+                    }
                 )
 
             if new_rows:
                 new_df = pd.DataFrame(new_rows)
-                # drop rows missing critical fields
+                # Drop rows missing critical fields
                 new_df = new_df.dropna(subset=["timestamp", "last_traded_price"])
                 if not new_df.empty:
                     st.session_state.live_data = pd.concat(
@@ -998,13 +1030,13 @@ with tab2:
                     processed_rows += len(new_df)
 
         if processed_rows > 0:
-            # keep only the latest MAX_WINDOW_SIZE, sort by time, dedup identical timestamps
+            # Keep only latest MAX_WINDOW_SIZE, sort by time, de-dup identical timestamps
             df = st.session_state.live_data
             df = df.dropna(subset=["timestamp", "last_traded_price"])
             df = df.sort_values("timestamp")
             df = df.drop_duplicates(subset=["timestamp"], keep="last").tail(MAX_WINDOW_SIZE).reset_index(drop=True)
 
-            # compute indicators & model features
+            # Compute indicators & model features
             df = calculate_indicators_live(df)
             st.session_state.live_data = df
 
@@ -1043,7 +1075,7 @@ with tab2:
         else:
             try:
                 breeze = BreezeConnect(api_key=api_key)
-                # Set callback BEFORE connecting/subscribing so we don't miss the first payload
+                # Set callback BEFORE connecting/subscribing so we don't miss first payload
                 breeze.on_ticks = on_ticks
                 breeze.generate_session(api_secret=api_secret, session_token=session_token)
                 breeze.ws_connect()
@@ -1101,7 +1133,7 @@ with tab2:
             return
 
         # strict typing & sorting (safety for charts)
-        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
         df["last_traded_price"] = pd.to_numeric(df["last_traded_price"], errors="coerce")
         df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
         df = df.dropna(subset=["timestamp", "last_traded_price"]).sort_values("timestamp")
@@ -1173,11 +1205,19 @@ with tab2:
             if st.session_state.equity_curve:
                 st.subheader("📈 Equity Curve (Total PnL)")
                 eq_df = pd.DataFrame(st.session_state.equity_curve)
-                eq_df["timestamp"] = pd.to_datetime(eq_df["timestamp"], errors="coerce")
+                eq_df["timestamp"] = pd.to_datetime(eq_df["timestamp"], errors="coerce", utc=True)
                 eq_df = eq_df.dropna(subset=["timestamp"]).sort_values("timestamp")
                 st.line_chart(eq_df.set_index("timestamp")["total_pnl"])
 
-    # ---------------- Live render loop (continuous) ----------------
+        # --- Quick diagnostics ---
+        st.caption(
+            f"Debug — ticks in queue: {st.session_state.tick_queue.qsize()} | "
+            f"live rows: {len(st.session_state.live_data)} | "
+            f"last ts: {st.session_state.live_data['timestamp'].iloc[-1] if not st.session_state.live_data.empty else '—'}"
+        )
+
+    # ---------------- Live render (continuous) ----------------
+    run_live = 'run_live' in locals() and run_live  # guard in case user hasn't toggled yet
     if run_live:
         render_dashboard_once()
         time.sleep(RENDER_SLEEP_SEC)
