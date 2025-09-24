@@ -764,7 +764,7 @@ with tab1:
 
 with tab2:
 
-st.title("📊 Live Trading Dashboard")
+    st.title("📊 Live Trading Dashboard")
 
     # ---------------- Constants ----------------
     MAX_WINDOW_SIZE   = 15000      # rolling window for in-memory charting
