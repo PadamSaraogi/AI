@@ -764,6 +764,7 @@ with tab1:
 
 with tab2:
 
+
     st.title("📊 Live Trading Dashboard")
 
     # ---------------- Constants ----------------
