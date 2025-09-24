@@ -764,11 +764,12 @@ with tab1:
 
 with tab2:
 
-    st.title("📊 Live Trading Dashboard")
+st.title("📊 Live Trading Dashboard")
 
     # ---------------- Constants ----------------
-    MAX_WINDOW_SIZE  = 15000     # rolling window for in-memory charting
-    RENDER_SLEEP_SEC = 1.0       # refresh interval (seconds)
+    MAX_WINDOW_SIZE   = 15000      # rolling window for in-memory charting
+    RENDER_SLEEP_SEC  = 1.0        # short sleep before rerun
+    IDLE_REFRESH_SEC  = 5.0        # heartbeat when no new ticks
 
     # ---------------- Logging ----------------
     logger = logging.getLogger("LiveTradingLogger")
@@ -780,7 +781,7 @@ with tab2:
         logger.addHandler(fh)
 
     # ---------------- Global queue (thread-safe, NOT in Streamlit state) ----------------
-    # Persist across reruns via module attributes so the background thread keeps the same objects.
+    # Persist across reruns via module attribute so the background thread keeps the same queue.
     GLOBAL_TICK_QUEUE = getattr(sys.modules[__name__], "GLOBAL_TICK_QUEUE", None)
     if GLOBAL_TICK_QUEUE is None:
         GLOBAL_TICK_QUEUE = queue.Queue()
@@ -800,7 +801,9 @@ with tab2:
         "equity_curve": [],          # list of {timestamp, total_pnl}
         "model": None,
         "breeze": None,
-        "last_ticks": []
+        "last_ticks": [],
+        "run_live": False,           # bound to toggle (survives reruns)
+        "last_render_ts": 0.0,       # for throttled reruns
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -1051,6 +1054,7 @@ with tab2:
         """
         Drain the global queue -> append to live_data -> compute indicators -> maybe signal.
         NO DEDUPING: every tick becomes a new row with a unique timestamp.
+        Returns: number of rows appended this pass.
         """
         processed_rows = 0
         q = GLOBAL_TICK_QUEUE
@@ -1099,6 +1103,8 @@ with tab2:
                     latest_timestamp = pd.to_datetime(df["timestamp"].iloc[-1])
                     update_trades(pred, latest_price, latest_timestamp)
 
+        return processed_rows
+
     # ---------------- Connection Settings ----------------
     with st.expander("🔑 Connection Settings", expanded=True):
         # (Use your own secret management in production)
@@ -1115,7 +1121,14 @@ with tab2:
         with col_conn1:
             connect_pressed = st.button("🚀 Connect & Subscribe")
         with col_conn2:
-            run_live = st.toggle("🔁 Auto-update charts (continuous refresh)", value=True)
+            st.toggle(
+                "🔁 Auto-update charts (continuous refresh)",
+                key="run_live",
+                value=st.session_state.get("run_live", False)
+            )
+
+    # cache the toggle value for this run
+    run_live = st.session_state.get("run_live", False)
 
     # ---------------- Connect & Subscribe ----------------
     if connect_pressed:
@@ -1175,13 +1188,14 @@ with tab2:
     def render_dashboard_once():
         """
         One pass: drain queue, recompute indicators/signals, and rerender all UI placeholders.
+        Returns: number of rows appended this pass (for throttling logic).
         """
-        process_tick_queue()
+        processed = process_tick_queue()
 
         df = st.session_state.live_data.copy()
         if df.empty:
             ph_table.info("⚙️ Connect with valid credentials and wait for live ticks...")
-            return
+            return processed
 
         # strict typing & sorting (safety for charts)
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
@@ -1190,7 +1204,7 @@ with tab2:
         df = df.dropna(subset=["timestamp", "last_traded_price"]).sort_values("timestamp")
         if df.empty:
             ph_table.info("Awaiting valid price ticks...")
-            return
+            return processed
 
         latest_price = float(df["last_traded_price"].iloc[-1])
         open_pnl = 0.0
@@ -1237,8 +1251,6 @@ with tab2:
         with ph_table.container():
             st.subheader("📝 Latest Data")
             st.dataframe(df.tail(30))
-            st.write("🔎 Parsed tail(50)")
-            st.dataframe(st.session_state.live_data.tail(50))
 
         # --- Position & Trades ---
         with ph_pos.container():
@@ -1276,13 +1288,27 @@ with tab2:
             if isinstance(sample_one, dict):
                 st.caption(f"Tick keys seen: {sorted(list(sample_one.keys()))[:20]}")
 
-    # ---------------- Live render (continuous) ----------------
-    if 'run_live' in locals() and run_live:
-        render_dashboard_once()
+        return processed
+
+    # ---------------- Live render (THROTTLED) ----------------
+    processed_rows = render_dashboard_once()
+    now = time.time()
+    should_rerun = False
+
+    # Only rerun when:
+    # - user enabled live mode, AND
+    # - we are connected (breeze set), AND
+    # - (we processed new ticks) OR (heartbeat elapsed)
+    if run_live and st.session_state.get("breeze") is not None:
+        if processed_rows and processed_rows > 0:
+            should_rerun = True
+        elif now - st.session_state.last_render_ts >= IDLE_REFRESH_SEC:
+            should_rerun = True
+
+    if should_rerun:
+        st.session_state.last_render_ts = now
         time.sleep(RENDER_SLEEP_SEC)
         st.rerun()
-    else:
-        render_dashboard_once()
 
     # ---------------- Raw ticks preview & logs ----------------
     st.subheader("🟢 Raw Tick Preview (last 10)")
