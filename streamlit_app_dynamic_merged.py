@@ -764,13 +764,12 @@ with tab1:
 
 with tab2:
 
-
     st.title("📊 Live Trading Dashboard")
 
     # ---------------- Constants ----------------
     MAX_WINDOW_SIZE   = 15000      # rolling window for in-memory charting
     RENDER_SLEEP_SEC  = 1.0        # short sleep before rerun
-    IDLE_REFRESH_SEC  = 5.0        # heartbeat when no new ticks
+    IDLE_REFRESH_SEC  = 3.0        # heartbeat when no new ticks
 
     # ---------------- Logging ----------------
     logger = logging.getLogger("LiveTradingLogger")
@@ -782,7 +781,6 @@ with tab2:
         logger.addHandler(fh)
 
     # ---------------- Global queue (thread-safe, NOT in Streamlit state) ----------------
-    # Persist across reruns via module attribute so the background thread keeps the same queue.
     GLOBAL_TICK_QUEUE = getattr(sys.modules[__name__], "GLOBAL_TICK_QUEUE", None)
     if GLOBAL_TICK_QUEUE is None:
         GLOBAL_TICK_QUEUE = queue.Queue()
@@ -797,61 +795,73 @@ with tab2:
     # ---------------- Session State Defaults ----------------
     defaults = {
         "live_data": pd.DataFrame(),
-        "position": None,            # {"entry_price": float, "entry_time": ts}
-        "trades": [],                # list of {entry_price, exit_price, entry_time, exit_time, pnl}
-        "equity_curve": [],          # list of {timestamp, total_pnl}
+        "position": None,
+        "trades": [],
+        "equity_curve": [],
         "model": None,
         "breeze": None,
         "last_ticks": [],
-        "run_live": False,           # bound to toggle (survives reruns)
-        "last_render_ts": 0.0,       # for throttled reruns
+        "run_live": False,
+        "last_render_ts": 0.0,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
-    # ---------------- Timestamp parsing ----------------
-    def _parse_timestamp(ltt):
-        """
-        Accepts ISO strings, pandas Timestamps, or numeric epoch (ms/s).
-        Returns pandas.Timestamp (UTC) or NaT.
-        """
-        if ltt is None or (isinstance(ltt, float) and np.isnan(ltt)):
+    # ---------------- Helpers ----------------
+    def _clean_num(x):
+        """Coerce price/volume strings like '1,234.50 ' -> float."""
+        if x is None:
+            return np.nan
+        if isinstance(x, str):
+            x = x.replace(",", "").strip()
+        return pd.to_numeric(x, errors="coerce")
+
+    def _parse_timestamp(val):
+        """ISO / pandas-like / epoch ms/s -> UTC Timestamp or NaT."""
+        if val is None or (isinstance(val, float) and np.isnan(val)):
             return pd.NaT
-        ts = pd.to_datetime(ltt, errors="coerce", utc=True)
+        ts = pd.to_datetime(val, errors="coerce", utc=True)
         if pd.notna(ts):
             return ts
         try:
-            x = float(ltt)
+            x = float(val)
             unit = "ms" if x > 1e10 else "s"
             return pd.to_datetime(x, unit=unit, utc=True, errors="coerce")
         except Exception:
             return pd.NaT
 
-    # Try many keys and fallback to arrival time if needed; make every ts unique
+    def _nested_get(d, keys):
+        for k in keys:
+            v = d.get(k)
+            if isinstance(v, dict):
+                d = v
+            else:
+                return v
+        return None
+
     def _extract_ts_and_price(t):
         """
-        Return (timestamp_uniq: pd.Timestamp|NaT, ltp: float|nan).
-        - Handles JSON strings and nested dicts.
-        - Tries many possible timestamp/price keys.
-        - Falls back to arrival time if needed.
-        - Appends microsecond bump from a global sequence to GUARANTEE uniqueness.
+        Return (unique_ts, ltp) from very permissive inputs:
+        - Accepts json string or dict, with optional 'data'/'payload' nesting.
+        - Tries many price keys, falls back to best-bid/ask mid or last close.
+        - Appends microsecond bump to guarantee unique timestamps.
         """
-        # If provider sends a JSON string, parse it
+        # Parse json strings
         if isinstance(t, str):
             try:
                 t = json.loads(t)
             except Exception:
                 t = {"raw": t}
 
-        # If nested payload like {"data": {...}} or {"d": {...}}
+        # Unwrap common nestings
         if isinstance(t, dict):
             for k in ("data", "payload", "tick", "d"):
                 if isinstance(t.get(k), dict):
                     t = t[k]
                     break
 
-        # Timestamp candidates (many vendor variations)
+        # Timestamp candidates
         ts_raw = (
             t.get("ltt")
             or t.get("exchange_time")
@@ -865,28 +875,39 @@ with tab2:
         )
         ts = _parse_timestamp(ts_raw)
         if pd.isna(ts):
-            # fallback: monotonic arrival time (ns) to avoid collapsing multiple ticks
             ts = pd.to_datetime(time.time_ns(), unit="ns", utc=True, errors="coerce")
 
-        # PRICE: be very permissive with keys / casing
-        def _first_exist(d, keys):
-            for k in keys:
-                if k in d and d[k] not in (None, ""):
-                    return d[k]
-            return None
-
+        # Primary price candidates
         price_keys = [
             "last", "Last", "LAST",
             "last_traded_price", "LastTradedPrice", "lastTradedPrice",
             "ltp", "LTP",
             "lastPrice", "LastPrice",
             "close", "Close",
-            "price", "Price"
+            "price", "Price",
         ]
-        ltp = _first_exist(t, price_keys)
-        ltp = pd.to_numeric(ltp, errors="coerce")
+        ltp = None
+        for k in price_keys:
+            if isinstance(t, dict) and k in t and t[k] not in (None, ""):
+                ltp = t[k]; break
 
-        # Make timestamp UNIQUE by adding a tiny microsecond bump each row
+        # Nested market depth fallback: e.g., t["md"]["best_bid_price"], t["md"]["best_ask_price"]
+        if ltp is None and isinstance(t, dict):
+            md = t.get("md") or t.get("market_depth") or {}
+            bid = md.get("best_bid_price") or md.get("bid") or _nested_get(md, ["b", "p"])
+            ask = md.get("best_ask_price") or md.get("ask") or _nested_get(md, ["a", "p"])
+            bid = _clean_num(bid); ask = _clean_num(ask)
+            if not np.isnan(bid) and not np.isnan(ask):
+                ltp = (bid + ask) / 2.0
+
+        # As a last resort, sometimes feeds put price in md['last']
+        if ltp is None and isinstance(t, dict):
+            md_last = _nested_get(t, ["md", "last"]) or _nested_get(t, ["market_depth", "last"])
+            ltp = md_last
+
+        ltp = _clean_num(ltp)
+
+        # Make timestamp unique
         try:
             seq = sys.modules[__name__].GLOBAL_TICK_SEQ + 1
             sys.modules[__name__].GLOBAL_TICK_SEQ = seq
@@ -898,23 +919,13 @@ with tab2:
 
     # ---------------- Feature Engineering ----------------
     def _compute_feature_block(df_ticks: pd.DataFrame) -> pd.DataFrame:
-        """
-        Build features expected by the trained model:
-          - ADX14 (from 1m OHLC)
-          - bb_width (Bollinger bandwidth from 1m close)
-          - hour_of_day
-          - return_1h (pct change over 60 minutes, bar-close based)
-          - volume_spike_ratio (tick volume vs rolling mean of last N ticks)
-        Bar features are asof-merged back to the tick timeline.
-        """
         if df_ticks.empty:
             return df_ticks
-
         df = df_ticks.copy()
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
-        df = df.dropna(subset=["timestamp", "last_traded_price"]).sort_values("timestamp")
+        df = df.dropna(subset=["timestamp"]).sort_values("timestamp")
 
-        # 1-minute bars from ticks
+        # 1-minute bars
         bars = (
             df.set_index("timestamp")
               .resample("1min")
@@ -926,7 +937,6 @@ with tab2:
               .dropna(subset=["open","high","low","close"])
         )
 
-        # Indicators on bars
         try:
             adx = ta.trend.adx(bars["high"], bars["low"], bars["close"], window=14)
             bb  = ta.volatility.BollingerBands(bars["close"], window=20, window_dev=2)
@@ -935,7 +945,6 @@ with tab2:
             adx = pd.Series(index=bars.index, dtype=float)
             bb_width = pd.Series(index=bars.index, dtype=float)
 
-        # 1-hour return on bar close (60 minutes back)
         close_1h_ago = bars["close"].shift(60)
         ret_1h = (bars["close"] / close_1h_ago - 1.0)
 
@@ -945,7 +954,6 @@ with tab2:
             "return_1h": ret_1h,
         }).dropna(how="all").sort_index()
 
-        # As-of merge bar features back to tick timeline
         df = pd.merge_asof(
             df.sort_values("timestamp"),
             bar_features,
@@ -954,26 +962,22 @@ with tab2:
             direction="backward"
         )
 
-        # Hour of day
         df["hour_of_day"] = df["timestamp"].dt.hour.astype("float64")
-
-        # Volume spike ratio on ticks
         vol = pd.to_numeric(df["volume"], errors="coerce")
         rolling_mean = vol.rolling(200, min_periods=20).mean()
         df["volume_spike_ratio"] = (vol / rolling_mean).astype("float64")
-
         return df
 
     def calculate_indicators_live(df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Compute fast tick indicators (EMA/ATR/RSI) + the model's broader feature block.
-        """
         if df.empty:
             return df
-
         work = df.copy().sort_values("timestamp")
-        price = pd.to_numeric(work["last_traded_price"], errors="coerce")
+        # Forward-fill price so indicators don’t die on missing prices
+        work["last_traded_price"] = pd.to_numeric(work["last_traded_price"], errors="coerce")
+        work["last_traded_price"] = work["last_traded_price"].ffill()
+        work["volume"] = pd.to_numeric(work["volume"], errors="coerce").fillna(0)
 
+        price = work["last_traded_price"]
         if len(work) >= 20:
             work["ema_20"] = ta.trend.ema_indicator(price, window=20)
         if len(work) >= 50:
@@ -988,10 +992,6 @@ with tab2:
         return work
 
     def predict_signal(model, df: pd.DataFrame):
-        """
-        Align to model.feature_names_in_ if available, otherwise use a sensible fallback.
-        Skip prediction until all required features are present and non-null.
-        """
         if model is None or df.empty:
             return None, None
         req = list(getattr(model, "feature_names_in_", []))
@@ -1000,7 +1000,7 @@ with tab2:
         missing = [c for c in req if c not in df.columns]
         if missing:
             return None, None
-        latest = df.dropna(subset=req)
+        latest = df.dropna(subset=[c for c in req if c != "volume_spike_ratio"])  # allow vol ratio to be NaN early
         if latest.empty:
             return None, None
         X = latest.iloc[-1:][req]
@@ -1010,26 +1010,19 @@ with tab2:
 
     # ---------------- Trading State ----------------
     def update_trades(signal, price, timestamp):
-        """
-        Basic long-only toggle: 1 = open if flat; -1 = close if open.
-        Tracks equity curve from realized + open PnL.
-        """
         pos = st.session_state.position
-
         if signal == 1 and pos is None:
             st.session_state.position = {"entry_price": price, "entry_time": timestamp}
             logger.info(f"Opened position at {price} on {timestamp}")
-
         elif signal == -1 and pos is not None:
             pnl = price - pos["entry_price"]
-            trade_record = {
+            st.session_state.trades.append({
                 "entry_price": pos["entry_price"],
                 "exit_price": price,
                 "entry_time": pos["entry_time"],
                 "exit_time": timestamp,
                 "pnl": pnl,
-            }
-            st.session_state.trades.append(trade_record)
+            })
             st.session_state.position = None
             logger.info(f"Closed position at {price} on {timestamp} | PnL {pnl:.2f}")
 
@@ -1040,10 +1033,6 @@ with tab2:
 
     # ---------------- Breeze websocket callback (background thread safe) ----------------
     def on_ticks(ticks):
-        """
-        Background thread. Never touch Streamlit here.
-        Just enqueue and log.
-        """
         try:
             GLOBAL_TICK_QUEUE.put(ticks, block=False)
         except Exception:
@@ -1053,9 +1042,8 @@ with tab2:
     # ---------------- Tick processing (main thread) ----------------
     def process_tick_queue():
         """
-        Drain the global queue -> append to live_data -> compute indicators -> maybe signal.
-        NO DEDUPING: every tick becomes a new row with a unique timestamp.
-        Returns: number of rows appended this pass.
+        Drain queue -> append to live_data (keep all) -> compute indicators -> maybe signal.
+        Returns: #rows appended this pass.
         """
         processed_rows = 0
         q = GLOBAL_TICK_QUEUE
@@ -1075,12 +1063,12 @@ with tab2:
                     vol = t.get("volume") or t.get("ltq") or t.get("quantity")
                 new_rows.append({
                     "timestamp": ts,
-                    "last_traded_price": ltp,
-                    "volume": pd.to_numeric(vol, errors="coerce"),
+                    "last_traded_price": _clean_num(ltp),
+                    "volume": _clean_num(vol),
                 })
 
             if new_rows:
-                new_df = pd.DataFrame(new_rows).dropna(subset=["timestamp", "last_traded_price"])
+                new_df = pd.DataFrame(new_rows).dropna(subset=["timestamp"])
                 if not new_df.empty:
                     st.session_state.live_data = pd.concat(
                         [st.session_state.live_data, new_df], ignore_index=True
@@ -1089,18 +1077,14 @@ with tab2:
 
         if processed_rows > 0:
             df = st.session_state.live_data
-            # sort by unique timestamps
-            df = df.dropna(subset=["timestamp", "last_traded_price"]).sort_values("timestamp").reset_index(drop=True)
-
-            # Compute indicators & features
+            df = df.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
             df = calculate_indicators_live(df)
             st.session_state.live_data = df
 
-            # Model signal
             if st.session_state.model is not None and not df.empty:
                 pred, conf = predict_signal(st.session_state.model, df)
                 if pred is not None:
-                    latest_price = float(df["last_traded_price"].iloc[-1])
+                    latest_price = float(df["last_traded_price"].ffill().iloc[-1])
                     latest_timestamp = pd.to_datetime(df["timestamp"].iloc[-1])
                     update_trades(pred, latest_price, latest_timestamp)
 
@@ -1108,7 +1092,6 @@ with tab2:
 
     # ---------------- Connection Settings ----------------
     with st.expander("🔑 Connection Settings", expanded=True):
-        # (Use your own secret management in production)
         api_key = "=4c730660p24@d03%65343MG909o217L"
         api_secret = "416D2gJdy064P7F7)s5e590J8I1692~7"
 
@@ -1128,7 +1111,6 @@ with tab2:
                 value=st.session_state.get("run_live", False)
             )
 
-    # cache the toggle value for this run
     run_live = st.session_state.get("run_live", False)
 
     # ---------------- Connect & Subscribe ----------------
@@ -1140,12 +1122,10 @@ with tab2:
         else:
             try:
                 breeze = BreezeConnect(api_key=api_key)
-                # Set callback BEFORE connecting/subscribing so we don't miss the first payload
                 breeze.on_ticks = on_ticks
                 breeze.generate_session(api_secret=api_secret, session_token=session_token)
                 breeze.ws_connect()
 
-                # Subscribe using token OR (exchange + stock_code)
                 if stock_token.strip():
                     breeze.subscribe_feeds(
                         stock_token=stock_token.strip(),
@@ -1166,7 +1146,6 @@ with tab2:
 
                 st.session_state.breeze = breeze
 
-                # Load model
                 model_bytes = uploaded_model_file.read()
                 st.session_state.model = joblib.load(io.BytesIO(model_bytes))
                 st.success("✅ Connected, subscribed & model loaded.")
@@ -1200,12 +1179,18 @@ with tab2:
 
         # strict typing & sorting (safety for charts)
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
-        df["last_traded_price"] = pd.to_numeric(df["last_traded_price"], errors="coerce")
-        df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
-        df = df.dropna(subset=["timestamp", "last_traded_price"]).sort_values("timestamp")
+        df["last_traded_price"] = pd.to_numeric(df["last_traded_price"], errors="coerce").ffill()
+        df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0)
+        df = df.dropna(subset=["timestamp"]).sort_values("timestamp")
         if df.empty:
             ph_table.info("Awaiting valid price ticks...")
             return processed
+
+        # Ensure at least 2 points so the chart shows
+        if len(df) == 1:
+            pad = df.iloc[-1].copy()
+            pad["timestamp"] = pad["timestamp"] - pd.to_timedelta(1, unit="s")
+            df = pd.concat([pd.DataFrame([pad]), df], ignore_index=True)
 
         latest_price = float(df["last_traded_price"].iloc[-1])
         open_pnl = 0.0
@@ -1229,15 +1214,11 @@ with tab2:
             with ph_ema.container():
                 st.subheader("📍 EMA 20 & EMA 50")
                 st.line_chart(df.set_index("timestamp")[["ema_20", "ema_50"]])
-        else:
-            ph_ema.empty()
 
         if "RSI" in df.columns:
             with ph_rsi.container():
                 st.subheader("🔄 RSI")
                 st.line_chart(df.set_index("timestamp")[["RSI"]])
-        else:
-            ph_rsi.empty()
 
         if "ATR" in df.columns:
             with ph_atr.container():
@@ -1296,11 +1277,8 @@ with tab2:
     now = time.time()
     should_rerun = False
 
-    # Only rerun when:
-    # - user enabled live mode, AND
-    # - we are connected (breeze set), AND
-    # - (we processed new ticks) OR (heartbeat elapsed)
-    if run_live and st.session_state.get("breeze") is not None:
+    if st.session_state.get("run_live", False):
+        # Rerun on new ticks or gentle heartbeat
         if processed_rows and processed_rows > 0:
             should_rerun = True
         elif now - st.session_state.last_render_ts >= IDLE_REFRESH_SEC:
