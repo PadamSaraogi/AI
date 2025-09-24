@@ -764,10 +764,11 @@ with tab1:
 
 with tab2:
 
+
     st.title("📊 Live Trading Dashboard")
 
     # ---------------- Constants ----------------
-    MAX_WINDOW_SIZE   = 15000      # rolling window for in-memory charting
+    MAX_WINDOW_SIZE   = 15000      # keep last N ticks in memory
     RENDER_SLEEP_SEC  = 1.0        # short sleep before rerun
     IDLE_REFRESH_SEC  = 3.0        # heartbeat when no new ticks
 
@@ -786,7 +787,7 @@ with tab2:
         GLOBAL_TICK_QUEUE = queue.Queue()
         sys.modules[__name__].GLOBAL_TICK_QUEUE = GLOBAL_TICK_QUEUE
 
-    # Monotonic sequence to make timestamps unique across reruns
+    # Monotonic seq to make timestamps unique across reruns
     GLOBAL_TICK_SEQ = getattr(sys.modules[__name__], "GLOBAL_TICK_SEQ", None)
     if GLOBAL_TICK_SEQ is None:
         GLOBAL_TICK_SEQ = 0
@@ -810,7 +811,7 @@ with tab2:
 
     # ---------------- Helpers ----------------
     def _clean_num(x):
-        """Coerce price/volume strings like '1,234.50 ' -> float."""
+        """Coerce strings like '1,234.50 ' -> float; None->NaN."""
         if x is None:
             return np.nan
         if isinstance(x, str):
@@ -843,8 +844,8 @@ with tab2:
     def _extract_ts_and_price(t):
         """
         Return (unique_ts, ltp) from very permissive inputs:
-        - Accepts json string or dict, with optional 'data'/'payload' nesting.
-        - Tries many price keys, falls back to best-bid/ask mid or last close.
+        - Accepts JSON string or dict, with optional 'data'/'payload' nesting.
+        - Tries many price keys, falls back to best-bid/ask mid or md['last'].
         - Appends microsecond bump to guarantee unique timestamps.
         """
         # Parse json strings
@@ -863,35 +864,26 @@ with tab2:
 
         # Timestamp candidates
         ts_raw = (
-            t.get("ltt")
-            or t.get("exchange_time")
-            or t.get("last_trade_time")
-            or t.get("trade_time")
-            or t.get("time")
-            or t.get("timestamp")
-            or t.get("datetime")
-            or t.get("created_at")
-            or None
+            t.get("ltt") or t.get("exchange_time") or t.get("last_trade_time")
+            or t.get("trade_time") or t.get("time") or t.get("timestamp")
+            or t.get("datetime") or t.get("created_at") or None
         )
         ts = _parse_timestamp(ts_raw)
         if pd.isna(ts):
             ts = pd.to_datetime(time.time_ns(), unit="ns", utc=True, errors="coerce")
 
-        # Primary price candidates
+        # Price candidates
         price_keys = [
-            "last", "Last", "LAST",
-            "last_traded_price", "LastTradedPrice", "lastTradedPrice",
-            "ltp", "LTP",
-            "lastPrice", "LastPrice",
-            "close", "Close",
-            "price", "Price",
+            "last","Last","LAST","last_traded_price","LastTradedPrice","lastTradedPrice",
+            "ltp","LTP","lastPrice","LastPrice","close","Close","price","Price"
         ]
         ltp = None
-        for k in price_keys:
-            if isinstance(t, dict) and k in t and t[k] not in (None, ""):
-                ltp = t[k]; break
+        if isinstance(t, dict):
+            for k in price_keys:
+                if k in t and t[k] not in (None, ""):
+                    ltp = t[k]; break
 
-        # Nested market depth fallback: e.g., t["md"]["best_bid_price"], t["md"]["best_ask_price"]
+        # Fallback to market depth mid
         if ltp is None and isinstance(t, dict):
             md = t.get("md") or t.get("market_depth") or {}
             bid = md.get("best_bid_price") or md.get("bid") or _nested_get(md, ["b", "p"])
@@ -900,9 +892,9 @@ with tab2:
             if not np.isnan(bid) and not np.isnan(ask):
                 ltp = (bid + ask) / 2.0
 
-        # As a last resort, sometimes feeds put price in md['last']
+        # Last resort from md
         if ltp is None and isinstance(t, dict):
-            md_last = _nested_get(t, ["md", "last"]) or _nested_get(t, ["market_depth", "last"])
+            md_last = _nested_get(t, ["md","last"]) or _nested_get(t, ["market_depth","last"])
             ltp = md_last
 
         ltp = _clean_num(ltp)
@@ -917,7 +909,7 @@ with tab2:
 
         return ts, ltp
 
-    # ---------------- Feature Engineering ----------------
+    # ---------------- Feature Engineering (optional; never drops rows) ----------------
     def _compute_feature_block(df_ticks: pd.DataFrame) -> pd.DataFrame:
         if df_ticks.empty:
             return df_ticks
@@ -972,9 +964,8 @@ with tab2:
         if df.empty:
             return df
         work = df.copy().sort_values("timestamp")
-        # Forward-fill price so indicators don’t die on missing prices
-        work["last_traded_price"] = pd.to_numeric(work["last_traded_price"], errors="coerce")
-        work["last_traded_price"] = work["last_traded_price"].ffill()
+        # forward-fill price; keep rows even if NaN in source
+        work["last_traded_price"] = pd.to_numeric(work["last_traded_price"], errors="coerce").ffill()
         work["volume"] = pd.to_numeric(work["volume"], errors="coerce").fillna(0)
 
         price = work["last_traded_price"]
@@ -1000,7 +991,7 @@ with tab2:
         missing = [c for c in req if c not in df.columns]
         if missing:
             return None, None
-        latest = df.dropna(subset=[c for c in req if c != "volume_spike_ratio"])  # allow vol ratio to be NaN early
+        latest = df.dropna(subset=[c for c in req if c != "volume_spike_ratio"])
         if latest.empty:
             return None, None
         X = latest.iloc[-1:][req]
@@ -1008,7 +999,7 @@ with tab2:
         proba = float(model.predict_proba(X).max()) if hasattr(model, "predict_proba") else 1.0
         return pred, proba
 
-    # ---------------- Trading State ----------------
+    # ---------------- Trading State (unchanged) ----------------
     def update_trades(signal, price, timestamp):
         pos = st.session_state.position
         if signal == 1 and pos is None:
@@ -1039,10 +1030,11 @@ with tab2:
             pass
         logger.info(f"Received raw tick: {ticks}")
 
-    # ---------------- Tick processing (main thread) ----------------
+    # ---------------- Tick processing (append ALL rows, keep raw) ----------------
     def process_tick_queue():
         """
-        Drain queue -> append to live_data (keep all) -> compute indicators -> maybe signal.
+        Drain queue -> append *all raw ticks* to live_data.
+        No filtering. Always adds a row with raw payload.
         Returns: #rows appended this pass.
         """
         processed_rows = 0
@@ -1065,19 +1057,20 @@ with tab2:
                     "timestamp": ts,
                     "last_traded_price": _clean_num(ltp),
                     "volume": _clean_num(vol),
+                    "raw": json.dumps(t) if isinstance(t, dict) else str(t),
                 })
 
             if new_rows:
-                new_df = pd.DataFrame(new_rows).dropna(subset=["timestamp"])
-                if not new_df.empty:
-                    st.session_state.live_data = pd.concat(
-                        [st.session_state.live_data, new_df], ignore_index=True
-                    ).tail(MAX_WINDOW_SIZE).reset_index(drop=True)
-                    processed_rows += len(new_df)
+                new_df = pd.DataFrame(new_rows)
+                # ✅ append everything (no row drop), cap memory with tail()
+                st.session_state.live_data = pd.concat(
+                    [st.session_state.live_data, new_df], ignore_index=True
+                ).tail(MAX_WINDOW_SIZE).reset_index(drop=True)
+                processed_rows += len(new_df)
 
         if processed_rows > 0:
-            df = st.session_state.live_data
-            df = df.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+            # Indicators/features are computed on a copy and merged back
+            df = st.session_state.live_data.copy()
             df = calculate_indicators_live(df)
             st.session_state.live_data = df
 
@@ -1182,9 +1175,6 @@ with tab2:
         df["last_traded_price"] = pd.to_numeric(df["last_traded_price"], errors="coerce").ffill()
         df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0)
         df = df.dropna(subset=["timestamp"]).sort_values("timestamp")
-        if df.empty:
-            ph_table.info("Awaiting valid price ticks...")
-            return processed
 
         # Ensure at least 2 points so the chart shows
         if len(df) == 1:
@@ -1229,10 +1219,33 @@ with tab2:
                 else:
                     st.info("ATR warming up...")
 
-        # --- Data snapshot ---
+        # --- Data snapshot + Downloads ---
         with ph_table.container():
-            st.subheader("📝 Latest Data")
+            st.subheader("📝 Latest Cleaned Data")
             st.dataframe(df.tail(30))
+
+            st.subheader("📦 Raw Payloads")
+            st.dataframe(st.session_state.live_data.tail(30)[["timestamp", "raw"]])
+
+            # Download buttons
+            cdl, cdr = st.columns(2)
+            with cdl:
+                cleaned_csv = df.to_csv(index=False)
+                st.download_button(
+                    "⬇️ Download Cleaned CSV",
+                    data=cleaned_csv,
+                    file_name="live_cleaned.csv",
+                    mime="text/csv"
+                )
+            with cdr:
+                raw_df = st.session_state.live_data.copy()
+                raw_csv = raw_df[["timestamp","raw"]].to_csv(index=False)
+                st.download_button(
+                    "⬇️ Download Raw Ticks CSV",
+                    data=raw_csv,
+                    file_name="live_raw_ticks.csv",
+                    mime="text/csv"
+                )
 
         # --- Position & Trades ---
         with ph_pos.container():
@@ -1276,9 +1289,7 @@ with tab2:
     processed_rows = render_dashboard_once()
     now = time.time()
     should_rerun = False
-
     if st.session_state.get("run_live", False):
-        # Rerun on new ticks or gentle heartbeat
         if processed_rows and processed_rows > 0:
             should_rerun = True
         elif now - st.session_state.last_render_ts >= IDLE_REFRESH_SEC:
@@ -1289,13 +1300,14 @@ with tab2:
         time.sleep(RENDER_SLEEP_SEC)
         st.rerun()
 
-    # ---------------- Raw ticks preview & logs ----------------
+    # ---------------- Raw ticks preview & Logs ----------------
     st.subheader("🟢 Raw Tick Preview (last 10)")
     if st.session_state.last_ticks:
         st.json(st.session_state.last_ticks)
     else:
         st.write("⚙️ Waiting for ticks...")
 
+    # Existing log download (kept)
     if st.button("📥 Download Logs"):
         try:
             with open("live_trading.log", "r") as f:
