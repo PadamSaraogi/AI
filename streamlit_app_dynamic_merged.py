@@ -780,11 +780,17 @@ with tab2:
         logger.addHandler(fh)
 
     # ---------------- Global queue (thread-safe, NOT in Streamlit state) ----------------
-    # Persist across reruns via module attribute so the background thread keeps the same queue.
+    # Persist across reruns via module attributes so the background thread keeps the same objects.
     GLOBAL_TICK_QUEUE = getattr(sys.modules[__name__], "GLOBAL_TICK_QUEUE", None)
     if GLOBAL_TICK_QUEUE is None:
         GLOBAL_TICK_QUEUE = queue.Queue()
         sys.modules[__name__].GLOBAL_TICK_QUEUE = GLOBAL_TICK_QUEUE
+
+    # Monotonic sequence to make timestamps unique across reruns
+    GLOBAL_TICK_SEQ = getattr(sys.modules[__name__], "GLOBAL_TICK_SEQ", None)
+    if GLOBAL_TICK_SEQ is None:
+        GLOBAL_TICK_SEQ = 0
+        sys.modules[__name__].GLOBAL_TICK_SEQ = GLOBAL_TICK_SEQ
 
     # ---------------- Session State Defaults ----------------
     defaults = {
@@ -818,12 +824,30 @@ with tab2:
         except Exception:
             return pd.NaT
 
-    # Try many keys and fallback to arrival time if needed
+    # Try many keys and fallback to arrival time if needed; make every ts unique
     def _extract_ts_and_price(t):
         """
-        Return (timestamp: pd.Timestamp|NaT, ltp: float|nan).
-        Tries many timestamp fields; falls back to high-res arrival time to keep points distinct.
+        Return (timestamp_uniq: pd.Timestamp|NaT, ltp: float|nan).
+        - Handles JSON strings and nested dicts.
+        - Tries many possible timestamp/price keys.
+        - Falls back to arrival time if needed.
+        - Appends microsecond bump from a global sequence to GUARANTEE uniqueness.
         """
+        # If provider sends a JSON string, parse it
+        if isinstance(t, str):
+            try:
+                t = json.loads(t)
+            except Exception:
+                t = {"raw": t}
+
+        # If nested payload like {"data": {...}} or {"d": {...}}
+        if isinstance(t, dict):
+            for k in ("data", "payload", "tick", "d"):
+                if isinstance(t.get(k), dict):
+                    t = t[k]
+                    break
+
+        # Timestamp candidates (many vendor variations)
         ts_raw = (
             t.get("ltt")
             or t.get("exchange_time")
@@ -840,16 +864,33 @@ with tab2:
             # fallback: monotonic arrival time (ns) to avoid collapsing multiple ticks
             ts = pd.to_datetime(time.time_ns(), unit="ns", utc=True, errors="coerce")
 
-        ltp = (
-            t.get("last")
-            or t.get("last_traded_price")
-            or t.get("ltp")
-            or t.get("lastPrice")
-            or t.get("close")
-            or t.get("price")
-            or np.nan
-        )
-        return ts, pd.to_numeric(ltp, errors="coerce")
+        # PRICE: be very permissive with keys / casing
+        def _first_exist(d, keys):
+            for k in keys:
+                if k in d and d[k] not in (None, ""):
+                    return d[k]
+            return None
+
+        price_keys = [
+            "last", "Last", "LAST",
+            "last_traded_price", "LastTradedPrice", "lastTradedPrice",
+            "ltp", "LTP",
+            "lastPrice", "LastPrice",
+            "close", "Close",
+            "price", "Price"
+        ]
+        ltp = _first_exist(t, price_keys)
+        ltp = pd.to_numeric(ltp, errors="coerce")
+
+        # Make timestamp UNIQUE by adding a tiny microsecond bump each row
+        try:
+            seq = sys.modules[__name__].GLOBAL_TICK_SEQ + 1
+            sys.modules[__name__].GLOBAL_TICK_SEQ = seq
+            ts = ts + pd.to_timedelta(seq % 1_000_000, unit="us")
+        except Exception:
+            ts = pd.to_datetime(time.time_ns(), unit="ns", utc=True, errors="coerce")
+
+        return ts, ltp
 
     # ---------------- Feature Engineering ----------------
     def _compute_feature_block(df_ticks: pd.DataFrame) -> pd.DataFrame:
@@ -1008,8 +1049,8 @@ with tab2:
     # ---------------- Tick processing (main thread) ----------------
     def process_tick_queue():
         """
-        Drain the global queue -> append to live_data -> clean -> compute indicators -> maybe signal.
-        Uses safe dedup so legitimate same-second ticks are kept.
+        Drain the global queue -> append to live_data -> compute indicators -> maybe signal.
+        NO DEDUPING: every tick becomes a new row with a unique timestamp.
         """
         processed_rows = 0
         q = GLOBAL_TICK_QUEUE
@@ -1024,7 +1065,9 @@ with tab2:
             new_rows = []
             for t in batch:
                 ts, ltp = _extract_ts_and_price(t)
-                vol = t.get("volume") or t.get("ltq") or t.get("quantity") or np.nan
+                vol = None
+                if isinstance(t, dict):
+                    vol = t.get("volume") or t.get("ltq") or t.get("quantity")
                 new_rows.append({
                     "timestamp": ts,
                     "last_traded_price": ltp,
@@ -1036,28 +1079,13 @@ with tab2:
                 if not new_df.empty:
                     st.session_state.live_data = pd.concat(
                         [st.session_state.live_data, new_df], ignore_index=True
-                    )
+                    ).tail(MAX_WINDOW_SIZE).reset_index(drop=True)
                     processed_rows += len(new_df)
 
         if processed_rows > 0:
             df = st.session_state.live_data
-
-            # Sort and preserve multiple ticks at same second
-            df = df.dropna(subset=["timestamp", "last_traded_price"]).sort_values("timestamp")
-
-            # If same timestamp occurs, micro-bump within group to maintain order
-            dup_mask = df["timestamp"].duplicated(keep=False)
-            if dup_mask.any():
-                df.loc[dup_mask, "ts_rank"] = df.loc[dup_mask].groupby("timestamp").cumcount()
-                df.loc[dup_mask, "timestamp"] = df.loc[dup_mask, "timestamp"] + pd.to_timedelta(df.loc[dup_mask, "ts_rank"], unit="us")
-                df = df.drop(columns=["ts_rank"])
-
-            # Drop only exact consecutive duplicates (same ts & same price)
-            df["prev_ts"] = df["timestamp"].shift(1)
-            df["prev_px"] = df["last_traded_price"].shift(1)
-            df = df[~((df["timestamp"] == df["prev_ts"]) & (df["last_traded_price"] == df["prev_px"]))]
-
-            df = df.tail(MAX_WINDOW_SIZE).reset_index(drop=True)
+            # sort by unique timestamps
+            df = df.dropna(subset=["timestamp", "last_traded_price"]).sort_values("timestamp").reset_index(drop=True)
 
             # Compute indicators & features
             df = calculate_indicators_live(df)
@@ -1073,7 +1101,7 @@ with tab2:
 
     # ---------------- Connection Settings ----------------
     with st.expander("🔑 Connection Settings", expanded=True):
-        # Using the keys you provided earlier; swap to secrets/env if needed
+        # (Use your own secret management in production)
         api_key = "=4c730660p24@d03%65343MG909o217L"
         api_secret = "416D2gJdy064P7F7)s5e590J8I1692~7"
 
@@ -1196,7 +1224,6 @@ with tab2:
         else:
             ph_rsi.empty()
 
-        # ATR can be NaN early; guard with dropna
         if "ATR" in df.columns:
             with ph_atr.container():
                 st.subheader("📊 ATR")
@@ -1209,7 +1236,9 @@ with tab2:
         # --- Data snapshot ---
         with ph_table.container():
             st.subheader("📝 Latest Data")
-            st.dataframe(df.tail(20))
+            st.dataframe(df.tail(30))
+            st.write("🔎 Parsed tail(50)")
+            st.dataframe(st.session_state.live_data.tail(50))
 
         # --- Position & Trades ---
         with ph_pos.container():
