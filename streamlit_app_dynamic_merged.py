@@ -808,7 +808,8 @@ with tab2:
         if v is None or (isinstance(v, float) and np.isnan(v)):
             return pd.NaT
         ts = pd.to_datetime(v, errors="coerce", utc=True)
-        if pd.notna(ts): return ts
+        if pd.notna(ts): 
+            return ts
         try:
             x = float(v)
             unit = "ms" if x > 1e10 else "s"
@@ -828,13 +829,16 @@ with tab2:
     def _extract_ts_price(t):
         """Parse JSON / nested dicts; ensure unique micro-bumped timestamp."""
         if isinstance(t, str):
-            try: t = json.loads(t)
-            except Exception: t = {"raw": t}
+            try:
+                t = json.loads(t)
+            except Exception:
+                t = {"raw": t}
 
         if isinstance(t, dict):
             for k in ("data", "payload", "tick", "d"):
                 if isinstance(t.get(k), dict):
-                    t = t[k]; break
+                    t = t[k]
+                    break
 
         ts_raw = (
             t.get("ltt") or t.get("exchange_time") or t.get("last_trade_time") or
@@ -867,7 +871,7 @@ with tab2:
 
         ltp = _clean_num(ltp)
 
-        # unique micro-bump using tickbus
+        # unique micro-bump using tickbus sequence
         try:
             seq = tickbus.next_seq()
             ts = ts + pd.to_timedelta(seq % 1_000_000, unit="us")
@@ -876,21 +880,37 @@ with tab2:
 
         return ts, ltp
 
-    # ---------- features / indicators (never drop rows) ----------
-    def _compute_feature_block(df):
-        if df.empty: return df
-        d = df.copy()
+    # ---------- features / indicators (duplicate-safe) ----------
+    def _compute_feature_block(df_ticks: pd.DataFrame) -> pd.DataFrame:
+        """
+        Build 1m-bar features and asof-merge back to ticks.
+        Duplicate-safe: drops pre-existing feature cols to avoid _x/_y.
+        """
+        if df_ticks.empty:
+            return df_ticks
+
+        d = df_ticks.copy()
         d["timestamp"] = pd.to_datetime(d["timestamp"], errors="coerce", utc=True)
         d = d.dropna(subset=["timestamp"]).sort_values("timestamp")
+
+        # 1-minute bars
         bars = (
-            d.set_index("timestamp").resample("1min")
-            .agg(open=("last_traded_price","first"),
-                 high=("last_traded_price","max"),
-                 low =("last_traded_price","min"),
-                 close=("last_traded_price","last"),
-                 vol  =("volume","sum"))
-            .dropna(subset=["open","high","low","close"])
+            d.set_index("timestamp")
+             .resample("1min")
+             .agg(open=("last_traded_price","first"),
+                  high=("last_traded_price","max"),
+                  low =("last_traded_price","min"),
+                  close=("last_traded_price","last"),
+                  vol  =("volume","sum"))
+             .dropna(subset=["open","high","low","close"])
         )
+        if bars.empty:
+            # still add tick-only features
+            d["hour_of_day"] = d["timestamp"].dt.hour.astype("float64")
+            vol = pd.to_numeric(d["volume"], errors="coerce")
+            d["volume_spike_ratio"] = (vol / vol.rolling(200, min_periods=20).mean()).astype("float64")
+            return d
+
         try:
             adx = ta.trend.adx(bars["high"], bars["low"], bars["close"], window=14)
             bb  = ta.volatility.BollingerBands(bars["close"], window=20, window_dev=2)
@@ -900,33 +920,69 @@ with tab2:
             bb_width = pd.Series(index=bars.index, dtype=float)
 
         ret_1h = (bars["close"] / bars["close"].shift(60) - 1.0)
-        feat = pd.DataFrame({"ADX14": adx, "bb_width": bb_width, "return_1h": ret_1h}).dropna(how="all")
-        d = pd.merge_asof(d.sort_values("timestamp"), feat.sort_index(), left_on="timestamp", right_index=True, direction="backward")
+
+        feat_cols = ["ADX14", "bb_width", "return_1h"]
+        feat = pd.DataFrame({"ADX14": adx, "bb_width": bb_width, "return_1h": ret_1h}).sort_index()
+
+        # drop any existing feature cols on left to avoid suffixes on merge
+        d = d.drop(columns=[c for c in feat_cols if c in d.columns], errors="ignore")
+
+        # asof-merge features back
+        d = pd.merge_asof(
+            d.sort_values("timestamp"),
+            feat.dropna(how="all"),
+            left_on="timestamp",
+            right_index=True,
+            direction="backward",
+            allow_exact_matches=True,
+        )
+
+        # tick-only features
         d["hour_of_day"] = d["timestamp"].dt.hour.astype("float64")
         vol = pd.to_numeric(d["volume"], errors="coerce")
         d["volume_spike_ratio"] = (vol / vol.rolling(200, min_periods=20).mean()).astype("float64")
+
         return d
 
-    def calculate_indicators_live(df):
-        if df.empty: return df
+    def calculate_indicators_live(df: pd.DataFrame) -> pd.DataFrame:
+        if df.empty:
+            return df
         d = df.copy().sort_values("timestamp")
+
+        # ensure numeric & forward-fill so indicators don't die
         d["last_traded_price"] = pd.to_numeric(d["last_traded_price"], errors="coerce").ffill()
         d["volume"] = pd.to_numeric(d["volume"], errors="coerce").fillna(0)
+
+        # clean up leftovers from any previous duplicate merges
+        for base in ["ADX14","bb_width","return_1h"]:
+            if base not in d.columns and f"{base}_x" in d.columns:
+                d.rename(columns={f"{base}_x": base}, inplace=True)
+            for suf in ("_x","_y"):
+                col = f"{base}{suf}"
+                if col in d.columns and col != base:
+                    d.drop(columns=[col], inplace=True, errors="ignore")
+
         price = d["last_traded_price"]
         if len(d) >= 20: d["ema_20"] = ta.trend.ema_indicator(price, window=20)
         if len(d) >= 50: d["ema_50"] = ta.trend.ema_indicator(price, window=50)
         if len(d) >= 14:
             d["ATR"] = ta.volatility.average_true_range(high=price, low=price, close=price, window=14)
             d["RSI"] = ta.momentum.rsi(price, window=14)
-        return _compute_feature_block(d)
+
+        # duplicate-safe bar-derived block
+        d = _compute_feature_block(d)
+        return d
 
     def predict_signal(model, df):
-        if model is None or df.empty: return None, None
+        if model is None or df.empty: 
+            return None, None
         req = list(getattr(model, "feature_names_in_", [])) or \
               ['ema_20','ema_50','ATR','RSI','ADX14','bb_width','hour_of_day','return_1h','volume_spike_ratio']
-        if any(c not in df.columns for c in req): return None, None
+        if any(c not in df.columns for c in req): 
+            return None, None
         latest = df.dropna(subset=[c for c in req if c != "volume_spike_ratio"])
-        if latest.empty: return None, None
+        if latest.empty: 
+            return None, None
         X = latest.iloc[-1:][req]
         pred = model.predict(X)[0]
         proba = float(model.predict_proba(X).max()) if hasattr(model, "predict_proba") else 1.0
@@ -938,15 +994,17 @@ with tab2:
             st.session_state.position = {"entry_price": price, "entry_time": timestamp}
         elif signal == -1 and pos is not None:
             pnl = price - pos["entry_price"]
-            st.session_state.trades.append({"entry_price": pos["entry_price"], "exit_price": price,
-                                            "entry_time": pos["entry_time"], "exit_time": timestamp, "pnl": pnl})
+            st.session_state.trades.append({
+                "entry_price": pos["entry_price"], "exit_price": price,
+                "entry_time": pos["entry_time"], "exit_time": timestamp, "pnl": pnl
+            })
             st.session_state.position = None
         total = sum(t['pnl'] for t in st.session_state.trades)
         if st.session_state.position is not None:
             total += (price - st.session_state.position["entry_price"])
         st.session_state.equity_curve.append({"timestamp": timestamp, "total_pnl": total})
 
-    # ---------- websocket callback (no Streamlit here!) ----------
+    # ---------- websocket callback (no Streamlit here) ----------
     def on_ticks(ticks):
         tickbus.put(ticks)                      # push into singleton queue
         logger.info(f"Received raw tick: {ticks}")
@@ -1086,7 +1144,7 @@ with tab2:
         if {"ema_20", "ema_50"}.issubset(df.columns):
             with ph_ema.container():
                 st.subheader("📍 EMA 20 & EMA 50")
-            st.line_chart(df.set_index("timestamp")[["ema_20", "ema_50"]])
+                st.line_chart(df.set_index("timestamp")[["ema_20", "ema_50"]])
 
         if "RSI" in df.columns:
             with ph_rsi.container():
@@ -1139,7 +1197,7 @@ with tab2:
                 eq = eq.dropna(subset=["timestamp"]).sort_values("timestamp")
                 st.line_chart(eq.set_index("timestamp")["total_pnl"])
 
-        # show the **real** shared queue size
+        # show the real shared queue size
         st.caption(f"Debug — tickbus qsize: {tickbus.TICK_QUEUE.qsize()} | "
                    f"rows: {len(st.session_state.live_data)} | "
                    f"last ts: {st.session_state.live_data['timestamp'].iloc[-1] if not st.session_state.live_data.empty else '—'}")
