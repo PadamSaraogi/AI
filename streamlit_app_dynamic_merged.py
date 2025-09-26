@@ -764,7 +764,6 @@ with tab1:
 
 with tab2:
 
-
     st.title("📊 Live Trading Dashboard")
 
     # ---------------- Constants ----------------
@@ -781,17 +780,18 @@ with tab2:
         fh.setFormatter(fmt)
         logger.addHandler(fh)
 
-    # ---------------- Global queue (thread-safe, NOT in Streamlit state) ----------------
-    GLOBAL_TICK_QUEUE = getattr(sys.modules[__name__], "GLOBAL_TICK_QUEUE", None)
-    if GLOBAL_TICK_QUEUE is None:
-        GLOBAL_TICK_QUEUE = queue.Queue()
-        sys.modules[__name__].GLOBAL_TICK_QUEUE = GLOBAL_TICK_QUEUE
-
-    # Monotonic seq to make timestamps unique across reruns
-    GLOBAL_TICK_SEQ = getattr(sys.modules[__name__], "GLOBAL_TICK_SEQ", None)
-    if GLOBAL_TICK_SEQ is None:
-        GLOBAL_TICK_SEQ = 0
-        sys.modules[__name__].GLOBAL_TICK_SEQ = GLOBAL_TICK_SEQ
+    # ---------------- Shared stream objects (persist across reruns) ----------------
+    @st.cache_resource
+    def get_shared_stream_objects():
+        """
+        Returns the SAME objects across reruns for this session:
+          - thread-safe tick_queue both threads use
+          - monotonic sequence for unique timestamps
+        """
+        return {
+            "tick_queue": queue.Queue(),
+            "seq": itertools.count(1),
+        }
 
     # ---------------- Session State Defaults ----------------
     defaults = {
@@ -846,8 +846,10 @@ with tab2:
         Return (unique_ts, ltp) from very permissive inputs:
         - Accepts JSON string or dict, with optional 'data'/'payload' nesting.
         - Tries many price keys, falls back to best-bid/ask mid or md['last'].
-        - Appends microsecond bump to guarantee unique timestamps.
+        - Appends microsecond bump using the shared sequence to guarantee uniqueness.
         """
+        shared = get_shared_stream_objects()
+
         # Parse json strings
         if isinstance(t, str):
             try:
@@ -899,10 +901,9 @@ with tab2:
 
         ltp = _clean_num(ltp)
 
-        # Make timestamp unique
+        # Make timestamp unique using the shared seq
         try:
-            seq = sys.modules[__name__].GLOBAL_TICK_SEQ + 1
-            sys.modules[__name__].GLOBAL_TICK_SEQ = seq
+            seq = next(shared["seq"])
             ts = ts + pd.to_timedelta(seq % 1_000_000, unit="us")
         except Exception:
             ts = pd.to_datetime(time.time_ns(), unit="ns", utc=True, errors="coerce")
@@ -1024,21 +1025,24 @@ with tab2:
 
     # ---------------- Breeze websocket callback (background thread safe) ----------------
     def on_ticks(ticks):
+        """Background thread. Never call Streamlit APIs here."""
         try:
-            GLOBAL_TICK_QUEUE.put(ticks, block=False)
+            shared = get_shared_stream_objects()
+            shared["tick_queue"].put(ticks, block=False)
         except Exception:
             pass
         logger.info(f"Received raw tick: {ticks}")
 
-    # ---------------- Tick processing (append ALL rows, keep raw) ----------------
+    # ---------------- Tick processing (append ALL rows, keep raw; use cached queue) ----------------
     def process_tick_queue():
         """
-        Drain queue -> append *all raw ticks* to live_data.
-        No filtering. Always adds a row with raw payload.
+        Drain queue -> append *all raw ticks* to live_data (no filtering).
+        Uses the cached shared queue so callback & UI share the SAME queue across reruns.
         Returns: #rows appended this pass.
         """
         processed_rows = 0
-        q = GLOBAL_TICK_QUEUE
+        shared = get_shared_stream_objects()
+        q = shared["tick_queue"]
 
         while not q.empty():
             ticks = q.get()
@@ -1069,7 +1073,7 @@ with tab2:
                 processed_rows += len(new_df)
 
         if processed_rows > 0:
-            # Indicators/features are computed on a copy and merged back
+            # Indicators/features computed on a copy; we never drop rows
             df = st.session_state.live_data.copy()
             df = calculate_indicators_live(df)
             st.session_state.live_data = df
@@ -1106,8 +1110,8 @@ with tab2:
 
     run_live = st.session_state.get("run_live", False)
 
-    # ---------------- Connect & Subscribe ----------------
-    if connect_pressed:
+    # ---------------- Connect & Subscribe (bind callback ONCE) ----------------
+    if connect_pressed and st.session_state.get("breeze") is None:
         if not (api_key and api_secret and session_token and exchange_code):
             st.error("⚠️ Please provide API key, API secret, session token, and exchange code.")
         elif uploaded_model_file is None:
@@ -1271,9 +1275,10 @@ with tab2:
                 eq_df = eq_df.dropna(subset=["timestamp"]).sort_values("timestamp")
                 st.line_chart(eq_df.set_index("timestamp")["total_pnl"])
 
-        # --- Quick diagnostics ---
+        # --- Quick diagnostics (including cached queue size) ---
+        shared_dbg = get_shared_stream_objects()
         st.caption(
-            f"Debug — qsize: {GLOBAL_TICK_QUEUE.qsize()} | "
+            f"Debug — cached qsize: {shared_dbg['tick_queue'].qsize()} | "
             f"rows: {len(st.session_state.live_data)} | "
             f"last ts: {st.session_state.live_data['timestamp'].iloc[-1] if not st.session_state.live_data.empty else '—'}"
         )
@@ -1289,7 +1294,7 @@ with tab2:
     processed_rows = render_dashboard_once()
     now = time.time()
     should_rerun = False
-    if st.session_state.get("run_live", False):
+    if st.session_state.get("run_live", False) and st.session_state.get("breeze") is not None:
         if processed_rows and processed_rows > 0:
             should_rerun = True
         elif now - st.session_state.last_render_ts >= IDLE_REFRESH_SEC:
@@ -1307,7 +1312,6 @@ with tab2:
     else:
         st.write("⚙️ Waiting for ticks...")
 
-    # Existing log download (kept)
     if st.button("📥 Download Logs"):
         try:
             with open("live_trading.log", "r") as f:
