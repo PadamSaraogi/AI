@@ -2,6 +2,7 @@ import itertools
 import json
 import os
 import streamlit as st
+import tickbus  
 import pandas as pd
 import numpy as np
 import urllib.parse
@@ -764,8 +765,6 @@ with tab1:
                 st.info("No intraday trades data available to display outlier trades.")
 
 with tab2:
-
-    import tickbus  # <-- our singleton queue lives here
 
     st.title("📊 Live Trading Dashboard")
 
