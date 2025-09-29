@@ -768,15 +768,13 @@ with tab2:
 
     st.title("📊 Live Trading Dashboard")
 
-    # ========= Pure module-level BUS for background → UI handoff =========
-    # IMPORTANT: This is a plain global — no st.* used here.
-    # It is safe to access from the websocket thread.
+    # ========= Pure module-level BUS (no Streamlit here) =========
     try:
         BUS
     except NameError:
         BUS = {
             "q": queue.Queue(),          # tick queue
-            "seq": itertools.count(1),   # micro-timestamp bump
+            "seq": itertools.count(1),   # micro timestamp bump
             "hb": 0,                     # heartbeat counter
         }
 
@@ -817,7 +815,7 @@ with tab2:
         if k not in st.session_state:
             st.session_state[k] = v
 
-    # ========= Helpers (safe for UI thread) =========
+    # ========= Utilities =========
     def _clean_num(x):
         if x is None: return np.nan
         if isinstance(x, str): x = x.replace(",", "").strip()
@@ -834,31 +832,43 @@ with tab2:
         except Exception:
             return pd.NaT
 
-    def _nested_get(d, keys):
-        cur = d
-        for k in keys:
-            v = cur.get(k)
-            if isinstance(v, dict):
-                cur = v
-            else:
-                return v
-        return None
+    def _to_jsonable(obj):
+        """Recursively convert to JSON-safe; else string."""
+        try:
+            json.dumps(obj)
+            return obj
+        except Exception:
+            pass
+        if isinstance(obj, dict):
+            return {str(k): _to_jsonable(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_to_jsonable(x) for x in obj]
+        try:
+            import numpy as _np
+            if isinstance(obj, _np.generic):
+                return obj.item()
+        except Exception:
+            pass
+        try:
+            import pandas as _pd
+            if isinstance(obj, _pd.Timestamp):
+                return obj.isoformat()
+        except Exception:
+            pass
+        return str(obj)
 
-    # ========= Tick parsing (NO Streamlit used here) =========
+    # ========= Tick parsing (no st.* here) =========
     def _extract_ts_price(t):
         # normalize to dict
         if isinstance(t, str):
-            try:
-                t = json.loads(t)
-            except Exception:
-                t = {"raw": t}
+            try: t = json.loads(t)
+            except Exception: t = {"raw": t}
 
         # unwrap common nesting
         if isinstance(t, dict):
             for k in ("data", "payload", "tick", "d"):
                 if isinstance(t.get(k), dict):
-                    t = t[k]
-                    break
+                    t = t[k]; break
 
         # timestamp
         ts_raw = (
@@ -870,7 +880,7 @@ with tab2:
         if pd.isna(ts):
             ts = pd.to_datetime(time.time_ns(), unit="ns", utc=True, errors="coerce")
 
-        # unique micro-bump (pure numeric timedelta)
+        # unique micro-bump (numeric timedelta)
         try:
             seq = next(BUS["seq"])
             ts = ts + pd.to_timedelta(seq % 1_000_000, unit="us")
@@ -1042,7 +1052,6 @@ with tab2:
             BUS["q"].put(ticks, block=False)
         except Exception:
             pass
-        # heartbeat on BUS only
         try:
             BUS["hb"] = (BUS.get("hb", 0) + 1) % 1_000_000_000
         except Exception:
@@ -1055,7 +1064,7 @@ with tab2:
         q = BUS["q"]
         while not q.empty():
             ticks = q.get()
-            st.session_state.last_ticks.append(ticks)
+            st.session_state.last_ticks.append(_to_jsonable(ticks))  # keep preview safe
             st.session_state.last_ticks = st.session_state.last_ticks[-10:]
             batch = ticks if isinstance(ticks, list) else [ticks]
 
@@ -1065,10 +1074,8 @@ with tab2:
                 vol = None
                 if isinstance(t, dict):
                     vol = t.get("volume") or t.get("ltq") or t.get("quantity")
-                # if price missing, try ffill from our buffer (do not drop row)
-                if pd.isna(ltp):
-                    if not st.session_state.live_data.empty:
-                        ltp = pd.to_numeric(st.session_state.live_data["last_traded_price"], errors="coerce").ffill().iloc[-1]
+                if pd.isna(ltp) and not st.session_state.live_data.empty:
+                    ltp = pd.to_numeric(st.session_state.live_data["last_traded_price"], errors="coerce").ffill().iloc[-1]
                 rows.append({
                     "timestamp": ts,
                     "last_traded_price": _clean_num(ltp),
@@ -1233,7 +1240,7 @@ with tab2:
         else:
             try:
                 breeze = BreezeConnect(api_key=api_key)
-                breeze.on_ticks = on_ticks          # <— callback has NO st.* calls
+                breeze.on_ticks = on_ticks          # callback has NO st.* calls
                 breeze.generate_session(api_secret=api_secret, session_token=session_token)
                 breeze.ws_connect()
 
@@ -1361,7 +1368,10 @@ with tab2:
                 st.dataframe(tail[["timestamp","last_traded_price","volume"]])
             st.write("Last raw tick batch:")
             if st.session_state.last_ticks:
-                st.json(st.session_state.last_ticks[-1])
+                try:
+                    st.json(st.session_state.last_ticks[-1])
+                except Exception:
+                    st.code(json.dumps(_to_jsonable(st.session_state.last_ticks[-1]), indent=2))
             else:
                 st.write("—")
             if st.button("Force refresh now"):
@@ -1430,9 +1440,17 @@ with tab2:
         time.sleep(RENDER_SLEEP_SEC)
         st.rerun()
 
-    # ========= Raw preview + log DL =========
+    # ========= Raw preview + log download (SAFE) =========
     st.subheader("🟢 Raw Tick Preview (last 10)")
-    st.json(st.session_state.last_ticks[-10:]) if st.session_state.last_ticks else st.write("⚙️ Waiting for ticks…")
+    if st.session_state.last_ticks:
+        safe = _to_jsonable(st.session_state.last_ticks[-10:])
+        try:
+            st.json(safe)
+        except Exception:
+            st.code(json.dumps(safe, indent=2))
+    else:
+        st.write("⚙️ Waiting for ticks…")
+
     if st.button("📥 Download Logs"):
         try:
             with open("live_trading.log", "r") as f:
