@@ -766,11 +766,9 @@ with tab1:
 
 with tab2:
 
-    st.title("📊 Live Trading Dashboard")
-
     # ---- constants ----
     MAX_WINDOW_SIZE  = 15000
-    RENDER_SLEEP_SEC = 0.8
+    RENDER_SLEEP_SEC = 0.5       # quick redraw when data arrives
     IDLE_REFRESH_SEC = 3.0
 
     # ---- logging ----
@@ -799,12 +797,13 @@ with tab2:
         "last_ticks": [],
         "run_live": False,
         "last_render_ts": 0.0,
+        "tick_heartbeat": 0,          # <— increments in on_ticks
         # decision-layer defaults
         "auto_trade": True,
         "conf_threshold": 0.55,
-        "adx_target_mult": 0.0,    # 0 disables ADX gate
+        "adx_target_mult": 0.0,       # 0 disables ADX gate
         "trail_mult": 0.0,
-        "time_limit": 0,           # minutes; 0 disables
+        "time_limit": 0,              # minutes; 0 disables
         "last_action_signal": None,
         "last_decision": None,
         "decision_history": [],
@@ -839,21 +838,27 @@ with tab2:
                 return v
         return None
 
-    # ---- extract timestamp & price from raw tick (very permissive) ----
+    # ---- extract timestamp & price from raw tick (hardened, no drops) ----
     def _extract_ts_price(t):
         shared = get_stream_bus()
 
+        # normalize to dict
         if isinstance(t, str):
-            try: t = json.loads(t)
-            except Exception: t = {"raw": t}
+            try:
+                t = json.loads(t)
+            except Exception:
+                t = {"raw": t}
 
+        # unwrap common nesting
         if isinstance(t, dict):
             for k in ("data", "payload", "tick", "d"):
                 if isinstance(t.get(k), dict):
-                    t = t[k]; break
+                    t = t[k]
+                    break
 
+        # timestamp
         ts_raw = (
-            t.get("ltt") or t.get("exchange_time") or t.get("last_trade_time")
+            t.get("ltt") or t.get("last_trade_time") or t.get("exchange_time")
             or t.get("trade_time") or t.get("time") or t.get("timestamp")
             or t.get("datetime") or t.get("created_at") or None
         )
@@ -861,6 +866,14 @@ with tab2:
         if pd.isna(ts):
             ts = pd.to_datetime(time.time_ns(), unit="ns", utc=True, errors="coerce")
 
+        # unique micro-bump (safe numeric timedelta)
+        try:
+            seq = next(shared["seq"])
+            ts = ts + pd.to_timedelta(seq % 1_000_000, unit="us")
+        except Exception:
+            pass
+
+        # price
         price_keys = [
             "last","Last","LAST","last_traded_price","LastTradedPrice","lastTradedPrice",
             "ltp","LTP","lastPrice","LastPrice","close","Close","price","Price"
@@ -870,34 +883,30 @@ with tab2:
             for k in price_keys:
                 if k in t and t[k] not in (None, ""):
                     ltp = t[k]; break
-
-        if ltp is None and isinstance(t, dict):
-            md = t.get("md") or t.get("market_depth") or {}
-            bid = md.get("best_bid_price") or md.get("bid") or _nested_get(md, ["b","p"])
-            ask = md.get("best_ask_price") or md.get("ask") or _nested_get(md, ["a","p"])
-            bid = _clean_num(bid); ask = _clean_num(ask)
-            if not np.isnan(bid) and not np.isnan(ask):
-                ltp = (bid + ask) / 2.0
-        if ltp is None and isinstance(t, dict):
-            ltp = _nested_get(t, ["md","last"]) or _nested_get(t, ["market_depth","last"])
+            if ltp is None:
+                md = t.get("md") or t.get("market_depth") or {}
+                bid = md.get("best_bid_price") or md.get("bid") or (md.get("b", {}) or {}).get("p")
+                ask = md.get("best_ask_price") or md.get("ask") or (md.get("a", {}) or {}).get("p")
+                bid = _clean_num(bid); ask = _clean_num(ask)
+                if not np.isnan(bid) and not np.isnan(ask):
+                    ltp = (bid + ask) / 2.0
+            if ltp is None:
+                last_trade = t.get("last_trade") or {}
+                ltp = last_trade.get("price")
 
         ltp = _clean_num(ltp)
 
-        # unique micro-bump so reruns never collapse same timestamps
-        try:
-            seq = next(shared["seq"])
-            ts = ts + pd.to_timedelta(seq % 1_000_000, unit="us")    
-        except Exception:
-            ts = pd.to_datetime(time.time_ns(), unit="ns", utc=True, errors="coerce")
+        # if missing, ffill from our buffer (keeps row alive)
+        if pd.isna(ltp):
+            if not st.session_state.live_data.empty:
+                ltp = pd.to_numeric(st.session_state.live_data["last_traded_price"], errors="coerce").ffill().iloc[-1]
+            else:
+                ltp = np.nan
 
         return ts, ltp
 
     # ---- features / indicators (duplicate-safe) ----
     def _compute_feature_block(df_ticks: pd.DataFrame) -> pd.DataFrame:
-        """
-        Build 1m-bar features and asof-merge back to ticks.
-        Duplicate-safe: drops pre-existing feature cols to avoid _x/_y suffixes.
-        """
         if df_ticks.empty: return df_ticks
         d = df_ticks.copy()
         d["timestamp"] = pd.to_datetime(d["timestamp"], errors="coerce", utc=True)
@@ -999,7 +1008,6 @@ with tab2:
             conf = float(proba[buy_idx]) if buy_idx is not None else float(proba.max())
         return pred, conf
 
-    # ---- signal normalization ----
     def _norm_signal(pred) -> int:
         if pred is None: return 0
         try:
@@ -1036,16 +1044,17 @@ with tab2:
             total += (float(price) - float(st.session_state.position["entry_price"]))
         st.session_state.equity_curve.append({"timestamp": timestamp, "total_pnl": float(total)})
 
-    # ---- websocket callback (no Streamlit calls here) ----
+    # ---- websocket callback (no Streamlit calls except heartbeat) ----
     def on_ticks(ticks):
         shared = get_stream_bus()
         try:
             shared["tick_queue"].put(ticks, block=False)
         except Exception:
             pass
+        st.session_state.tick_heartbeat = st.session_state.get("tick_heartbeat", 0) + 1
         logger.info(f"Tick: {ticks}")
 
-    # ---- queue processor (append ALL rows, keep raw) ----
+    # ---- queue processor (append ALL rows, repair NaT, keep raw) ----
     def process_tick_queue():
         shared = get_stream_bus()
         q = shared["tick_queue"]
@@ -1072,9 +1081,29 @@ with tab2:
 
             if rows:
                 df_new = pd.DataFrame(rows)
-                st.session_state.live_data = pd.concat(
-                    [st.session_state.live_data, df_new], ignore_index=True
-                ).tail(MAX_WINDOW_SIZE).reset_index(drop=True)
+
+                # --- REPAIR any NaT timestamps so downstream dropna never nukes them
+                if "timestamp" in df_new.columns:
+                    bad_ts = df_new["timestamp"].isna()
+                    if bad_ts.any():
+                        base = (st.session_state.live_data["timestamp"].iloc[-1]
+                                if ("timestamp" in st.session_state.live_data.columns and
+                                    not st.session_state.live_data.empty)
+                                else pd.Timestamp.utcnow().tz_localize("UTC"))
+                        fixes = []
+                        for i, is_bad in enumerate(bad_ts):
+                            if not is_bad:
+                                fixes.append(df_new.loc[i, "timestamp"])
+                            else:
+                                base = base + pd.to_timedelta(1, unit="us")
+                                fixes.append(base)
+                        df_new["timestamp"] = fixes
+
+                st.session_state.live_data = (
+                    pd.concat([st.session_state.live_data, df_new], ignore_index=True)
+                    .tail(MAX_WINDOW_SIZE)
+                    .reset_index(drop=True)
+                )
                 processed += len(df_new)
 
         if processed > 0:
@@ -1164,38 +1193,25 @@ with tab2:
             st.toggle("🔁 Auto-update charts (continuous refresh)", key="run_live",
                       value=st.session_state.get("run_live", False))
 
-    # ===== Grid Search + Optional Historical Seed =====
-    with st.expander("🧪 Grid Search & Seeding (optional)", expanded=True):
+    # ---- (optional) grid search thresholds + seed data ----
+    with st.expander("🧪 Grid Search & Seeding (optional)", expanded=False):
         colA, colB = st.columns(2)
-
-        # ---- A) Grid search CSV: set thresholds live ----
         with colA:
             grid_file = st.file_uploader("Upload grid_search_results_*.csv", type=["csv"], key="gsu")
-
-            st.session_state.setdefault("conf_threshold", st.session_state.conf_threshold)
-            st.session_state.setdefault("adx_target_mult", st.session_state.adx_target_mult)
-            st.session_state.setdefault("trail_mult", st.session_state.trail_mult)
-            st.session_state.setdefault("time_limit", st.session_state.time_limit)
-
             if grid_file is not None:
                 gdf = pd.read_csv(grid_file)
                 rename_map = {
-                    "ml_thresh":"ml_threshold", "ml_prob_threshold":"ml_threshold", "confidence_threshold":"ml_threshold",
-                    "adx_mult":"adx_target_mult", "adx_gate_mult":"adx_target_mult",
+                    "ml_thresh":"ml_threshold","ml_prob_threshold":"ml_threshold","confidence_threshold":"ml_threshold",
+                    "adx_mult":"adx_target_mult","adx_gate_mult":"adx_target_mult",
                     "trail":"trail_mult",
-                    "duration_limit":"time_limit", "hold_minutes":"time_limit",
-                    "pnl":"total_pnl", "max_dd":"max_drawdown", "trades":"trade_count",
+                    "duration_limit":"time_limit","hold_minutes":"time_limit",
+                    "pnl":"total_pnl","max_dd":"max_drawdown","trades":"trade_count",
                 }
                 gdf = gdf.rename(columns={k:v for k,v in rename_map.items() if k in gdf.columns})
                 sort_cols = ["total_pnl"] + (["max_drawdown"] if "max_drawdown" in gdf.columns else [])
                 sort_asc  = [False] + ([True] if "max_drawdown" in gdf.columns else [])
                 gdf_sorted = gdf.sort_values(sort_cols, ascending=sort_asc, na_position="last").reset_index(drop=True)
-
-                st.write("Top candidates:")
-                show_cols = [c for c in ["ml_threshold","adx_target_mult","trail_mult","time_limit",
-                                         "total_pnl","max_drawdown","trade_count"] if c in gdf_sorted.columns]
-                st.dataframe(gdf_sorted.head(10)[show_cols])
-
+                st.dataframe(gdf_sorted.head(10)[[c for c in ["ml_threshold","adx_target_mult","trail_mult","time_limit","total_pnl","max_drawdown","trade_count"] if c in gdf_sorted.columns]])
                 idx = st.selectbox("Pick a row to apply", options=range(min(10, len(gdf_sorted))), format_func=lambda i: f"Row {i}")
                 best = gdf_sorted.iloc[int(idx)]
                 if "ml_threshold" in best: st.session_state.conf_threshold = float(best["ml_threshold"])
@@ -1208,27 +1224,16 @@ with tab2:
                     f"trail × {st.session_state.trail_mult:.2f} | "
                     f"time limit {st.session_state.time_limit}m"
                 )
-
-            # manual knobs
-            st.session_state.conf_threshold = st.slider(
-                "Model confidence threshold", 0.50, 0.95, float(st.session_state.conf_threshold), 0.01
-            )
-            st.session_state.adx_target_mult = st.slider(
-                "ADX gate multiplier", 0.0, 3.0, float(st.session_state.adx_target_mult), 0.1
-            )
-            st.session_state.time_limit = st.number_input(
-                "Max holding time (minutes, 0 = disabled)", min_value=0, value=int(st.session_state.time_limit), step=1
-            )
+            st.session_state.conf_threshold = st.slider("Model confidence threshold", 0.50, 0.95, float(st.session_state.conf_threshold), 0.01)
+            st.session_state.adx_target_mult = st.slider("ADX gate multiplier", 0.0, 3.0, float(st.session_state.adx_target_mult), 0.1)
+            st.session_state.time_limit = st.number_input("Max holding time (minutes, 0=disabled)", min_value=0, value=int(st.session_state.time_limit), step=1)
             st.checkbox("Enable Auto-Trade", key="auto_trade", value=st.session_state.get("auto_trade", True))
 
-        # ---- B) Historical 1m OHLC seed: fill early indicator windows ----
         with colB:
             seed_file = st.file_uploader("Upload 1-minute OHLC seed (CSV)", type=["csv"], key="seed")
             st.caption("Expected columns: timestamp, open, high, low, close, (volume optional)")
-
             if seed_file is not None:
                 seed = pd.read_csv(seed_file)
-                # minimal normalization
                 for c in list(seed.columns):
                     if c.lower() == "datetime": seed.rename(columns={c: "timestamp"}, inplace=True)
                 seed["timestamp"] = pd.to_datetime(seed["timestamp"], utc=True, errors="coerce")
@@ -1239,23 +1244,9 @@ with tab2:
                     "volume": pd.to_numeric(seed.get("volume", 0), errors="coerce").fillna(0),
                     "raw": "seed"
                 }).dropna(subset=["last_traded_price"])
-
-                st.session_state.live_data = pd.concat(
-                    [seed_df, st.session_state.live_data], ignore_index=True
-                ).tail(MAX_WINDOW_SIZE).reset_index(drop=True)
+                st.session_state.live_data = pd.concat([seed_df, st.session_state.live_data], ignore_index=True).tail(MAX_WINDOW_SIZE).reset_index(drop=True)
                 st.session_state.live_data = calculate_indicators_live(st.session_state.live_data.copy())
                 st.success(f"Seeded {len(seed_df)} bars → indicators ready sooner (ADX/BB/return_1h).")
-
-        # status chip
-        last_dec = st.session_state.get("last_decision")
-        if last_dec:
-            label = {1:"BUY",0:"HOLD",-1:"SELL"}[last_dec["signal"]]
-            st.write(
-                f"**Latest decision:** {label} | source: `{last_dec['reason']}`"
-                + (f" | conf: {last_dec['conf']:.2f}" if last_dec["conf"] is not None else "")
-            )
-
-    run_live = st.session_state.get("run_live", False)
 
     # ---- connect once ----
     if connect_pressed and st.session_state.get("breeze") is None:
@@ -1385,6 +1376,7 @@ with tab2:
             c1.metric("📈 Last Price", f"₹{latest_price:.2f}")
             c2.metric("💰 Open PnL", f"{open_pnl:.2f}")
             c3.metric("📊 Total PnL", f"{total_pnl:.2f}")
+            st.metric("🫀 Tick heartbeat", st.session_state.get("tick_heartbeat", 0))
 
         with ph_candles.container():
             st.subheader("📊 Candles + Signals")
@@ -1392,6 +1384,22 @@ with tab2:
                 make_candles_with_signals(df, st.session_state.trades, st.session_state.position),
                 use_container_width=True
             )
+
+        with st.expander("🛠 Live Debug", expanded=True):
+            shared_dbg = get_stream_bus()
+            st.write(f"Queue size: **{shared_dbg['tick_queue'].qsize()}**")
+            st.write(f"Live rows: **{len(st.session_state.live_data)}**")
+            if not st.session_state.live_data.empty:
+                tail = st.session_state.live_data.tail(5).copy()
+                tail["timestamp"] = pd.to_datetime(tail["timestamp"], utc=True, errors="coerce")
+                st.dataframe(tail[["timestamp","last_traded_price","volume"]])
+            st.write("Last raw tick batch:")
+            if st.session_state.last_ticks:
+                st.json(st.session_state.last_ticks[-1])
+            else:
+                st.write("—")
+            if st.button("Force refresh now"):
+                st.rerun()
 
         with ph_line.container():
             st.subheader("📉 Price & Volume")
@@ -1448,25 +1456,21 @@ with tab2:
                 eq = eq.dropna(subset=["timestamp"]).sort_values("timestamp")
                 st.line_chart(eq.set_index("timestamp")["total_pnl"])
 
-        # debug
-        shared_dbg = get_stream_bus()
-        st.caption(
-            f"Debug — qsize: {shared_dbg['tick_queue'].qsize()} | "
-            f"rows: {len(st.session_state.live_data)} | "
-            f"last ts: {st.session_state.live_data['timestamp'].iloc[-1] if not st.session_state.live_data.empty else '—'}"
-        )
-
         return processed
 
-    # ---- live render loop (throttled) ----
+    # ---- live render loop (always rerun when data arrives) ----
     processed_rows = render_dashboard_once()
     now = time.time()
     should_rerun = False
-    if st.session_state.get("run_live", False) and st.session_state.get("breeze") is not None:
-        if processed_rows and processed_rows > 0:
+
+    # Always rerun when we processed any rows (fresh data)
+    if processed_rows and processed_rows > 0:
+        should_rerun = True
+    # Otherwise, idle-rerun only if the user enabled auto-update
+    elif st.session_state.get("run_live", False) and st.session_state.get("breeze") is not None:
+        if now - st.session_state.last_render_ts >= IDLE_REFRESH_SEC:
             should_rerun = True
-        elif now - st.session_state.last_render_ts >= IDLE_REFRESH_SEC:
-            should_rerun = True
+
     if should_rerun:
         st.session_state.last_render_ts = now
         time.sleep(RENDER_SLEEP_SEC)
