@@ -766,9 +766,11 @@ with tab1:
 
 with tab2:
 
+    st.title("📊 Live Trading Dashboard")
+
     # ---- constants ----
     MAX_WINDOW_SIZE  = 15000
-    RENDER_SLEEP_SEC = 0.5       # quick redraw when data arrives
+    RENDER_SLEEP_SEC = 0.5      # quick redraw when data arrives
     IDLE_REFRESH_SEC = 3.0
 
     # ---- logging ----
@@ -782,11 +784,15 @@ with tab2:
     # ---- shared resources (persist across reruns) ----
     @st.cache_resource
     def get_stream_bus():
-        """Same objects across reruns: tick_queue + monotonic seq."""
+        """Singleton objects shared by WS callback and UI thread."""
         import queue
-        return {"tick_queue": queue.Queue(), "seq": itertools.count(1)}
+        return {
+            "tick_queue": queue.Queue(),
+            "seq": itertools.count(1),  # unique micro-bump
+            "hb": 0,                    # heartbeat counter (WS increments here, NOT in st.session_state)
+        }
 
-    # ---- session defaults ----
+    # ---- session defaults (UI thread only) ----
     for k, v in {
         "live_data": pd.DataFrame(),
         "position": None,
@@ -797,13 +803,12 @@ with tab2:
         "last_ticks": [],
         "run_live": False,
         "last_render_ts": 0.0,
-        "tick_heartbeat": 0,          # <— increments in on_ticks
         # decision-layer defaults
         "auto_trade": True,
         "conf_threshold": 0.55,
-        "adx_target_mult": 0.0,       # 0 disables ADX gate
+        "adx_target_mult": 0.0,   # 0 disables ADX gate
         "trail_mult": 0.0,
-        "time_limit": 0,              # minutes; 0 disables
+        "time_limit": 0,          # minutes; 0 disables
         "last_action_signal": None,
         "last_decision": None,
         "decision_history": [],
@@ -840,7 +845,7 @@ with tab2:
 
     # ---- extract timestamp & price from raw tick (hardened, no drops) ----
     def _extract_ts_price(t):
-        shared = get_stream_bus()
+        bus = get_stream_bus()
 
         # normalize to dict
         if isinstance(t, str):
@@ -868,7 +873,7 @@ with tab2:
 
         # unique micro-bump (safe numeric timedelta)
         try:
-            seq = next(shared["seq"])
+            seq = next(bus["seq"])
             ts = ts + pd.to_timedelta(seq % 1_000_000, unit="us")
         except Exception:
             pass
@@ -1044,20 +1049,24 @@ with tab2:
             total += (float(price) - float(st.session_state.position["entry_price"]))
         st.session_state.equity_curve.append({"timestamp": timestamp, "total_pnl": float(total)})
 
-    # ---- websocket callback (no Streamlit calls except heartbeat) ----
+    # ---- WS callback (NO st.* calls here) ----
     def on_ticks(ticks):
-        shared = get_stream_bus()
+        bus = get_stream_bus()
         try:
-            shared["tick_queue"].put(ticks, block=False)
+            bus["tick_queue"].put(ticks, block=False)
         except Exception:
             pass
-        st.session_state.tick_heartbeat = st.session_state.get("tick_heartbeat", 0) + 1
+        # heartbeat on the bus only
+        try:
+            bus["hb"] = (bus.get("hb", 0) + 1) % 1_000_000_000
+        except Exception:
+            bus["hb"] = 0
         logger.info(f"Tick: {ticks}")
 
     # ---- queue processor (append ALL rows, repair NaT, keep raw) ----
     def process_tick_queue():
-        shared = get_stream_bus()
-        q = shared["tick_queue"]
+        bus = get_stream_bus()
+        q = bus["tick_queue"]
         processed = 0
 
         while not q.empty():
@@ -1193,62 +1202,7 @@ with tab2:
             st.toggle("🔁 Auto-update charts (continuous refresh)", key="run_live",
                       value=st.session_state.get("run_live", False))
 
-    # ---- (optional) grid search thresholds + seed data ----
-    with st.expander("🧪 Grid Search & Seeding (optional)", expanded=False):
-        colA, colB = st.columns(2)
-        with colA:
-            grid_file = st.file_uploader("Upload grid_search_results_*.csv", type=["csv"], key="gsu")
-            if grid_file is not None:
-                gdf = pd.read_csv(grid_file)
-                rename_map = {
-                    "ml_thresh":"ml_threshold","ml_prob_threshold":"ml_threshold","confidence_threshold":"ml_threshold",
-                    "adx_mult":"adx_target_mult","adx_gate_mult":"adx_target_mult",
-                    "trail":"trail_mult",
-                    "duration_limit":"time_limit","hold_minutes":"time_limit",
-                    "pnl":"total_pnl","max_dd":"max_drawdown","trades":"trade_count",
-                }
-                gdf = gdf.rename(columns={k:v for k,v in rename_map.items() if k in gdf.columns})
-                sort_cols = ["total_pnl"] + (["max_drawdown"] if "max_drawdown" in gdf.columns else [])
-                sort_asc  = [False] + ([True] if "max_drawdown" in gdf.columns else [])
-                gdf_sorted = gdf.sort_values(sort_cols, ascending=sort_asc, na_position="last").reset_index(drop=True)
-                st.dataframe(gdf_sorted.head(10)[[c for c in ["ml_threshold","adx_target_mult","trail_mult","time_limit","total_pnl","max_drawdown","trade_count"] if c in gdf_sorted.columns]])
-                idx = st.selectbox("Pick a row to apply", options=range(min(10, len(gdf_sorted))), format_func=lambda i: f"Row {i}")
-                best = gdf_sorted.iloc[int(idx)]
-                if "ml_threshold" in best: st.session_state.conf_threshold = float(best["ml_threshold"])
-                if "adx_target_mult" in best: st.session_state.adx_target_mult = float(best["adx_target_mult"])
-                if "trail_mult" in best: st.session_state.trail_mult = float(best["trail_mult"])
-                if "time_limit" in best: st.session_state.time_limit = int(best["time_limit"])
-                st.success(
-                    f"Applied → conf ≥ {st.session_state.conf_threshold:.2f} | "
-                    f"ADX × {st.session_state.adx_target_mult:.2f} | "
-                    f"trail × {st.session_state.trail_mult:.2f} | "
-                    f"time limit {st.session_state.time_limit}m"
-                )
-            st.session_state.conf_threshold = st.slider("Model confidence threshold", 0.50, 0.95, float(st.session_state.conf_threshold), 0.01)
-            st.session_state.adx_target_mult = st.slider("ADX gate multiplier", 0.0, 3.0, float(st.session_state.adx_target_mult), 0.1)
-            st.session_state.time_limit = st.number_input("Max holding time (minutes, 0=disabled)", min_value=0, value=int(st.session_state.time_limit), step=1)
-            st.checkbox("Enable Auto-Trade", key="auto_trade", value=st.session_state.get("auto_trade", True))
-
-        with colB:
-            seed_file = st.file_uploader("Upload 1-minute OHLC seed (CSV)", type=["csv"], key="seed")
-            st.caption("Expected columns: timestamp, open, high, low, close, (volume optional)")
-            if seed_file is not None:
-                seed = pd.read_csv(seed_file)
-                for c in list(seed.columns):
-                    if c.lower() == "datetime": seed.rename(columns={c: "timestamp"}, inplace=True)
-                seed["timestamp"] = pd.to_datetime(seed["timestamp"], utc=True, errors="coerce")
-                seed = seed.dropna(subset=["timestamp"]).sort_values("timestamp")
-                seed_df = pd.DataFrame({
-                    "timestamp": seed["timestamp"],
-                    "last_traded_price": pd.to_numeric(seed["close"], errors="coerce"),
-                    "volume": pd.to_numeric(seed.get("volume", 0), errors="coerce").fillna(0),
-                    "raw": "seed"
-                }).dropna(subset=["last_traded_price"])
-                st.session_state.live_data = pd.concat([seed_df, st.session_state.live_data], ignore_index=True).tail(MAX_WINDOW_SIZE).reset_index(drop=True)
-                st.session_state.live_data = calculate_indicators_live(st.session_state.live_data.copy())
-                st.success(f"Seeded {len(seed_df)} bars → indicators ready sooner (ADX/BB/return_1h).")
-
-    # ---- connect once ----
+    # ---- connect once (UI thread only) ----
     if connect_pressed and st.session_state.get("breeze") is None:
         if not (api_key and api_secret and session_token and exchange_code):
             st.error("⚠️ Provide API key, secret, session token, and exchange code.")
@@ -1257,7 +1211,7 @@ with tab2:
         else:
             try:
                 breeze = BreezeConnect(api_key=api_key)
-                breeze.on_ticks = on_ticks
+                breeze.on_ticks = on_ticks     # <- callback has NO st.* calls
                 breeze.generate_session(api_secret=api_secret, session_token=session_token)
                 breeze.ws_connect()
 
@@ -1371,12 +1325,13 @@ with tab2:
             open_pnl = latest_price - float(st.session_state.position["entry_price"])
         total_pnl = float(sum(t['pnl'] for t in st.session_state.trades))
 
+        bus = get_stream_bus()
         with ph_metrics.container():
-            c1, c2, c3 = st.columns(3)
+            c1, c2, c3, c4 = st.columns(4)
             c1.metric("📈 Last Price", f"₹{latest_price:.2f}")
             c2.metric("💰 Open PnL", f"{open_pnl:.2f}")
             c3.metric("📊 Total PnL", f"{total_pnl:.2f}")
-            st.metric("🫀 Tick heartbeat", st.session_state.get("tick_heartbeat", 0))
+            c4.metric("🫀 Tick heartbeat", bus.get("hb", 0))
 
         with ph_candles.container():
             st.subheader("📊 Candles + Signals")
@@ -1386,8 +1341,8 @@ with tab2:
             )
 
         with st.expander("🛠 Live Debug", expanded=True):
-            shared_dbg = get_stream_bus()
-            st.write(f"Queue size: **{shared_dbg['tick_queue'].qsize()}**")
+            st.write(f"Queue size: **{bus['tick_queue'].qsize()}**")
+            st.write(f"Heartbeat: **{bus.get('hb', 0)}**")
             st.write(f"Live rows: **{len(st.session_state.live_data)}**")
             if not st.session_state.live_data.empty:
                 tail = st.session_state.live_data.tail(5).copy()
