@@ -768,32 +768,32 @@ with tab2:
 
     st.title("📊 Live Trading Dashboard")
 
-    # ---- constants ----
+    # ========= Pure module-level BUS for background → UI handoff =========
+    # IMPORTANT: This is a plain global — no st.* used here.
+    # It is safe to access from the websocket thread.
+    try:
+        BUS
+    except NameError:
+        BUS = {
+            "q": queue.Queue(),          # tick queue
+            "seq": itertools.count(1),   # micro-timestamp bump
+            "hb": 0,                     # heartbeat counter
+        }
+
+    # ========= Constants & logging =========
     MAX_WINDOW_SIZE  = 15000
-    RENDER_SLEEP_SEC = 0.5      # quick redraw when data arrives
+    RENDER_SLEEP_SEC = 0.5
     IDLE_REFRESH_SEC = 3.0
 
-    # ---- logging ----
     logger = logging.getLogger("LiveTradingLogger")
     logger.setLevel(logging.INFO)
     if not logger.handlers:
         fh = logging.FileHandler("live_trading.log")
-        fh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        fh.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
         logger.addHandler(fh)
 
-    # ---- shared resources (persist across reruns) ----
-    @st.cache_resource
-    def get_stream_bus():
-        """Singleton objects shared by WS callback and UI thread."""
-        import queue
-        return {
-            "tick_queue": queue.Queue(),
-            "seq": itertools.count(1),  # unique micro-bump
-            "hb": 0,                    # heartbeat counter (WS increments here, NOT in st.session_state)
-        }
-
-    # ---- session defaults (UI thread only) ----
-    for k, v in {
+    # ========= Session defaults (UI thread only) =========
+    defaults = {
         "live_data": pd.DataFrame(),
         "position": None,
         "trades": [],
@@ -803,20 +803,21 @@ with tab2:
         "last_ticks": [],
         "run_live": False,
         "last_render_ts": 0.0,
-        # decision-layer defaults
+        # decisions
         "auto_trade": True,
         "conf_threshold": 0.55,
-        "adx_target_mult": 0.0,   # 0 disables ADX gate
+        "adx_target_mult": 0.0,
         "trail_mult": 0.0,
-        "time_limit": 0,          # minutes; 0 disables
+        "time_limit": 0,
         "last_action_signal": None,
         "last_decision": None,
         "decision_history": [],
-    }.items():
+    }
+    for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
-    # ---- helpers: number/timestamp parsing ----
+    # ========= Helpers (safe for UI thread) =========
     def _clean_num(x):
         if x is None: return np.nan
         if isinstance(x, str): x = x.replace(",", "").strip()
@@ -843,10 +844,8 @@ with tab2:
                 return v
         return None
 
-    # ---- extract timestamp & price from raw tick (hardened, no drops) ----
+    # ========= Tick parsing (NO Streamlit used here) =========
     def _extract_ts_price(t):
-        bus = get_stream_bus()
-
         # normalize to dict
         if isinstance(t, str):
             try:
@@ -871,9 +870,9 @@ with tab2:
         if pd.isna(ts):
             ts = pd.to_datetime(time.time_ns(), unit="ns", utc=True, errors="coerce")
 
-        # unique micro-bump (safe numeric timedelta)
+        # unique micro-bump (pure numeric timedelta)
         try:
-            seq = next(bus["seq"])
+            seq = next(BUS["seq"])
             ts = ts + pd.to_timedelta(seq % 1_000_000, unit="us")
         except Exception:
             pass
@@ -898,19 +897,10 @@ with tab2:
             if ltp is None:
                 last_trade = t.get("last_trade") or {}
                 ltp = last_trade.get("price")
-
         ltp = _clean_num(ltp)
+        return ts, ltp, t
 
-        # if missing, ffill from our buffer (keeps row alive)
-        if pd.isna(ltp):
-            if not st.session_state.live_data.empty:
-                ltp = pd.to_numeric(st.session_state.live_data["last_traded_price"], errors="coerce").ffill().iloc[-1]
-            else:
-                ltp = np.nan
-
-        return ts, ltp
-
-    # ---- features / indicators (duplicate-safe) ----
+    # ========= Indicators / features =========
     def _compute_feature_block(df_ticks: pd.DataFrame) -> pd.DataFrame:
         if df_ticks.empty: return df_ticks
         d = df_ticks.copy()
@@ -969,7 +959,6 @@ with tab2:
         d["last_traded_price"] = pd.to_numeric(d["last_traded_price"], errors="coerce").ffill()
         d["volume"] = pd.to_numeric(d["volume"], errors="coerce").fillna(0)
 
-        # clean remnants from any prior failed merges
         for base in ["ADX14","bb_width","return_1h"]:
             if base not in d.columns and f"{base}_x" in d.columns:
                 d.rename(columns={f"{base}_x": base}, inplace=True)
@@ -988,16 +977,14 @@ with tab2:
         d = _compute_feature_block(d)
         return d
 
-    # ---- model prediction (label + confidence) ----
+    # ========= Model prediction =========
     def predict_signal(model, df: pd.DataFrame):
         if model is None or df.empty: return None, None
         req = list(getattr(model, "feature_names_in_", [])) or \
               ['ema_20','ema_50','ATR','RSI','ADX14','bb_width','hour_of_day','return_1h','volume_spike_ratio']
         if any(c not in df.columns for c in req): return None, None
-
         latest = df.dropna(subset=[c for c in req if c != "volume_spike_ratio"])
         if latest.empty: return None, None
-
         X = latest.iloc[-1:][req]
         pred = model.predict(X)[0]
         conf = None
@@ -1027,7 +1014,7 @@ with tab2:
             if s in ("sell","short","close","exit","go_short"): return -1
             return 0
 
-    # ---- trading state updates ----
+    # ========= Trading state updates =========
     def update_trades(signal, price, timestamp):
         pos = st.session_state.position
         if signal == 1 and pos is None:
@@ -1049,26 +1036,23 @@ with tab2:
             total += (float(price) - float(st.session_state.position["entry_price"]))
         st.session_state.equity_curve.append({"timestamp": timestamp, "total_pnl": float(total)})
 
-    # ---- WS callback (NO st.* calls here) ----
+    # ========= WS callback (NO st.* calls) =========
     def on_ticks(ticks):
-        bus = get_stream_bus()
         try:
-            bus["tick_queue"].put(ticks, block=False)
+            BUS["q"].put(ticks, block=False)
         except Exception:
             pass
-        # heartbeat on the bus only
+        # heartbeat on BUS only
         try:
-            bus["hb"] = (bus.get("hb", 0) + 1) % 1_000_000_000
+            BUS["hb"] = (BUS.get("hb", 0) + 1) % 1_000_000_000
         except Exception:
-            bus["hb"] = 0
+            BUS["hb"] = 0
         logger.info(f"Tick: {ticks}")
 
-    # ---- queue processor (append ALL rows, repair NaT, keep raw) ----
+    # ========= Queue processor (UI thread) =========
     def process_tick_queue():
-        bus = get_stream_bus()
-        q = bus["tick_queue"]
         processed = 0
-
+        q = BUS["q"]
         while not q.empty():
             ticks = q.get()
             st.session_state.last_ticks.append(ticks)
@@ -1077,21 +1061,24 @@ with tab2:
 
             rows = []
             for t in batch:
-                ts, ltp = _extract_ts_price(t)
+                ts, ltp, raw = _extract_ts_price(t)
                 vol = None
                 if isinstance(t, dict):
                     vol = t.get("volume") or t.get("ltq") or t.get("quantity")
+                # if price missing, try ffill from our buffer (do not drop row)
+                if pd.isna(ltp):
+                    if not st.session_state.live_data.empty:
+                        ltp = pd.to_numeric(st.session_state.live_data["last_traded_price"], errors="coerce").ffill().iloc[-1]
                 rows.append({
                     "timestamp": ts,
                     "last_traded_price": _clean_num(ltp),
                     "volume": _clean_num(vol),
-                    "raw": json.dumps(t) if isinstance(t, dict) else str(t),
+                    "raw": json.dumps(raw) if isinstance(raw, dict) else str(raw),
                 })
 
             if rows:
                 df_new = pd.DataFrame(rows)
-
-                # --- REPAIR any NaT timestamps so downstream dropna never nukes them
+                # repair any NaT timestamps so nothing gets dropped later
                 if "timestamp" in df_new.columns:
                     bad_ts = df_new["timestamp"].isna()
                     if bad_ts.any():
@@ -1119,7 +1106,7 @@ with tab2:
             df = calculate_indicators_live(st.session_state.live_data.copy())
             st.session_state.live_data = df
 
-            # --- model + decision layer ---
+            # model + decisions
             if st.session_state.model is not None and not df.empty:
                 pred, conf = predict_signal(st.session_state.model, df)
                 sig = _norm_signal(pred)
@@ -1143,19 +1130,12 @@ with tab2:
                 last_px = float(pd.to_numeric(df["last_traded_price"].iloc[-1], errors="coerce"))
 
                 final_signal, reason = 0, "none"
-
-                # 1) time limit exit first
                 if time_limit_exit(now_ts):
                     final_signal = -1 if st.session_state.position is not None else 0
                     reason = "time_limit"
-
-                # 2) model-based action (confidence + ADX gate)
                 elif sig != 0 and conf is not None and conf >= float(st.session_state.conf_threshold) and adx_gate_ok(df):
                     if sig != st.session_state.last_action_signal:
-                        final_signal = sig
-                        reason = "model_conf_ok"
-
-                # 3) fallback EMA cross
+                        final_signal = sig; reason = "model_conf_ok"
                 elif {"ema_20","ema_50"}.issubset(df.columns):
                     e20, e50 = df["ema_20"].iloc[-1], df["ema_50"].iloc[-1]
                     pos_open = st.session_state.position is not None
@@ -1165,27 +1145,22 @@ with tab2:
                         elif e20 < e50 and pos_open:
                             final_signal = -1; reason = "fallback_ema"
 
-                # execute
                 if final_signal != 0 and st.session_state.auto_trade:
                     update_trades(final_signal, last_px, now_ts)
                     st.session_state.last_action_signal = final_signal
 
                 st.session_state.last_decision = {"ts": now_ts, "signal": final_signal, "reason": reason, "conf": conf}
-                # keep short decision history
                 dh = st.session_state.decision_history
                 dh.append({
-                    "timestamp": now_ts,
-                    "price": last_px,
+                    "timestamp": now_ts, "price": last_px,
                     "model_pred_raw": None if pred is None else str(pred),
-                    "model_conf": conf,
-                    "final_signal": final_signal,
-                    "reason": reason,
+                    "model_conf": conf, "final_signal": final_signal, "reason": reason,
                 })
                 st.session_state.decision_history = dh[-200:]
 
         return processed
 
-    # ---- connection settings ----
+    # ========= Connection settings =========
     with st.expander("🔑 Connection Settings", expanded=True):
         api_key = "=4c730660p24@d03%65343MG909o217L"
         api_secret = "416D2gJdy064P7F7)s5e590J8I1692~7"
@@ -1194,15 +1169,62 @@ with tab2:
         stock_code = st.text_input("Stock Code (e.g., NIFTY 50)")
         stock_token = st.text_input("Stock Token (optional)", value="")
         uploaded_model_file = st.file_uploader("Upload ML Model (.pkl)", type=["pkl"])
-
         c1, c2 = st.columns(2)
-        with c1:
-            connect_pressed = st.button("🚀 Connect & Subscribe")
-        with c2:
-            st.toggle("🔁 Auto-update charts (continuous refresh)", key="run_live",
-                      value=st.session_state.get("run_live", False))
+        with c1: connect_pressed = st.button("🚀 Connect & Subscribe")
+        with c2: st.toggle("🔁 Auto-update charts (continuous refresh)", key="run_live", value=st.session_state.get("run_live", False))
 
-    # ---- connect once (UI thread only) ----
+    # ========= Grid search + seed (optional) =========
+    with st.expander("🧪 Grid Search & Seeding (optional)", expanded=True):
+        colA, colB = st.columns(2)
+        with colA:
+            grid_file = st.file_uploader("Upload grid_search_results_*.csv", type=["csv"], key="gsu")
+            if grid_file is not None:
+                gdf = pd.read_csv(grid_file)
+                rename_map = {
+                    "ml_thresh":"ml_threshold","ml_prob_threshold":"ml_threshold","confidence_threshold":"ml_threshold",
+                    "adx_mult":"adx_target_mult","adx_gate_mult":"adx_target_mult",
+                    "trail":"trail_mult",
+                    "duration_limit":"time_limit","hold_minutes":"time_limit",
+                    "pnl":"total_pnl","max_dd":"max_drawdown","trades":"trade_count",
+                }
+                gdf = gdf.rename(columns={k:v for k,v in rename_map.items() if k in gdf.columns})
+                sort_cols = ["total_pnl"] + (["max_drawdown"] if "max_drawdown" in gdf.columns else [])
+                sort_asc  = [False] + ([True] if "max_drawdown" in gdf.columns else [])
+                gdf_sorted = gdf.sort_values(sort_cols, ascending=sort_asc, na_position="last").reset_index(drop=True)
+                show_cols = [c for c in ["ml_threshold","adx_target_mult","trail_mult","time_limit","total_pnl","max_drawdown","trade_count"] if c in gdf_sorted.columns]
+                st.dataframe(gdf_sorted.head(10)[show_cols])
+                idx = st.selectbox("Pick a row to apply", options=range(min(10, len(gdf_sorted))), format_func=lambda i: f"Row {i}")
+                best = gdf_sorted.iloc[int(idx)]
+                if "ml_threshold" in best: st.session_state.conf_threshold = float(best["ml_threshold"])
+                if "adx_target_mult" in best: st.session_state.adx_target_mult = float(best["adx_target_mult"])
+                if "trail_mult" in best: st.session_state.trail_mult = float(best["trail_mult"])
+                if "time_limit" in best: st.session_state.time_limit = int(best["time_limit"])
+                st.success(f"Applied → conf ≥ {st.session_state.conf_threshold:.2f} | ADX × {st.session_state.adx_target_mult:.2f} | trail × {st.session_state.trail_mult:.2f} | time {st.session_state.time_limit}m")
+            # manual knobs
+            st.session_state.conf_threshold = st.slider("Model confidence threshold", 0.50, 0.95, float(st.session_state.conf_threshold), 0.01)
+            st.session_state.adx_target_mult = st.slider("ADX gate multiplier", 0.0, 3.0, float(st.session_state.adx_target_mult), 0.1)
+            st.session_state.time_limit = st.number_input("Max holding time (minutes, 0=disabled)", min_value=0, value=int(st.session_state.time_limit), step=1)
+            st.checkbox("Enable Auto-Trade", key="auto_trade", value=st.session_state.get("auto_trade", True))
+        with colB:
+            seed_file = st.file_uploader("Upload 1-minute OHLC seed (CSV)", type=["csv"], key="seed")
+            st.caption("Expected columns: timestamp, open, high, low, close, (volume optional)")
+            if seed_file is not None:
+                seed = pd.read_csv(seed_file)
+                for c in list(seed.columns):
+                    if c.lower() == "datetime": seed.rename(columns={c: "timestamp"}, inplace=True)
+                seed["timestamp"] = pd.to_datetime(seed["timestamp"], utc=True, errors="coerce")
+                seed = seed.dropna(subset=["timestamp"]).sort_values("timestamp")
+                seed_df = pd.DataFrame({
+                    "timestamp": seed["timestamp"],
+                    "last_traded_price": pd.to_numeric(seed["close"], errors="coerce"),
+                    "volume": pd.to_numeric(seed.get("volume", 0), errors="coerce").fillna(0),
+                    "raw": "seed"
+                }).dropna(subset=["last_traded_price"])
+                st.session_state.live_data = pd.concat([seed_df, st.session_state.live_data], ignore_index=True).tail(MAX_WINDOW_SIZE).reset_index(drop=True)
+                st.session_state.live_data = calculate_indicators_live(st.session_state.live_data.copy())
+                st.success(f"Seeded {len(seed_df)} bars → indicators ready sooner (ADX/BB/return_1h).")
+
+    # ========= Connect (UI thread only) =========
     if connect_pressed and st.session_state.get("breeze") is None:
         if not (api_key and api_secret and session_token and exchange_code):
             st.error("⚠️ Provide API key, secret, session token, and exchange code.")
@@ -1211,7 +1233,7 @@ with tab2:
         else:
             try:
                 breeze = BreezeConnect(api_key=api_key)
-                breeze.on_ticks = on_ticks     # <- callback has NO st.* calls
+                breeze.on_ticks = on_ticks          # <— callback has NO st.* calls
                 breeze.generate_session(api_secret=api_secret, session_token=session_token)
                 breeze.ws_connect()
 
@@ -1233,7 +1255,7 @@ with tab2:
                 st.error(f"Connection error: {e}")
                 logger.error(f"Connection error: {e}")
 
-    # ---- placeholders ----
+    # ========= Placeholders =========
     ph_metrics = st.empty()
     ph_candles = st.empty()
     ph_line = st.empty()
@@ -1244,7 +1266,7 @@ with tab2:
     ph_trades = st.empty()
     ph_equity = st.empty()
 
-    # ---- plotly: candles + signals ----
+    # ========= Charts =========
     def make_candles_with_signals(df_ticks: pd.DataFrame, trades: list, current_pos: dict | None):
         if df_ticks.empty: return go.Figure()
         d = df_ticks.copy()
@@ -1261,10 +1283,7 @@ with tab2:
              .dropna(subset=["open","high","low","close"])
         )
         fig = go.Figure()
-        fig.add_trace(go.Candlestick(
-            x=bars.index, open=bars["open"], high=bars["high"],
-            low=bars["low"], close=bars["close"], name="Price"
-        ))
+        fig.add_trace(go.Candlestick(x=bars.index, open=bars["open"], high=bars["high"], low=bars["low"], close=bars["close"], name="Price"))
         overlays = []
         if "ema_20" in d.columns:
             ema20 = d.set_index("timestamp")["ema_20"].dropna().reindex(bars.index, method="pad")
@@ -1290,17 +1309,15 @@ with tab2:
                 et_bar = bars.index.asof(et)
                 if pd.notna(et_bar): buy_x.append(et_bar); buy_y.append(bars.loc[et_bar, "open"])
         if buy_x:
-            fig.add_trace(go.Scatter(x=buy_x, y=buy_y, mode="markers", name="BUY",
-                                     marker=dict(symbol="triangle-up", size=12)))
+            fig.add_trace(go.Scatter(x=buy_x, y=buy_y, mode="markers", name="BUY", marker=dict(symbol="triangle-up", size=12)))
         if sell_x:
-            fig.add_trace(go.Scatter(x=sell_x, y=sell_y, mode="markers", name="SELL",
-                                     marker=dict(symbol="triangle-down", size=12)))
+            fig.add_trace(go.Scatter(x=sell_x, y=sell_y, mode="markers", name="SELL", marker=dict(symbol="triangle-down", size=12)))
         fig.update_layout(height=520, margin=dict(l=10,r=10,t=40,b=10),
                           legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
         fig.update_xaxes(showgrid=False); fig.update_yaxes(showgrid=True)
         return fig
 
-    # ---- render once ----
+    # ========= Render once =========
     def render_dashboard_once():
         processed = process_tick_queue()
 
@@ -1320,29 +1337,23 @@ with tab2:
             df = pd.concat([pd.DataFrame([pad]), df], ignore_index=True)
 
         latest_price = float(df["last_traded_price"].iloc[-1])
-        open_pnl = 0.0
-        if st.session_state.position:
-            open_pnl = latest_price - float(st.session_state.position["entry_price"])
+        open_pnl = (latest_price - float(st.session_state.position["entry_price"])) if st.session_state.position else 0.0
         total_pnl = float(sum(t['pnl'] for t in st.session_state.trades))
 
-        bus = get_stream_bus()
         with ph_metrics.container():
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("📈 Last Price", f"₹{latest_price:.2f}")
             c2.metric("💰 Open PnL", f"{open_pnl:.2f}")
             c3.metric("📊 Total PnL", f"{total_pnl:.2f}")
-            c4.metric("🫀 Tick heartbeat", bus.get("hb", 0))
+            c4.metric("🫀 Tick heartbeat", BUS.get("hb", 0))
 
         with ph_candles.container():
             st.subheader("📊 Candles + Signals")
-            st.plotly_chart(
-                make_candles_with_signals(df, st.session_state.trades, st.session_state.position),
-                use_container_width=True
-            )
+            st.plotly_chart(make_candles_with_signals(df, st.session_state.trades, st.session_state.position), use_container_width=True)
 
         with st.expander("🛠 Live Debug", expanded=True):
-            st.write(f"Queue size: **{bus['tick_queue'].qsize()}**")
-            st.write(f"Heartbeat: **{bus.get('hb', 0)}**")
+            st.write(f"Queue size: **{BUS['q'].qsize()}**")
+            st.write(f"Heartbeat: **{BUS.get('hb', 0)}**")
             st.write(f"Live rows: **{len(st.session_state.live_data)}**")
             if not st.session_state.live_data.empty:
                 tail = st.session_state.live_data.tail(5).copy()
@@ -1379,24 +1390,16 @@ with tab2:
             st.dataframe(df.tail(30))
             st.subheader("📦 Raw Payloads")
             st.dataframe(st.session_state.live_data.tail(30)[["timestamp","raw"]])
-
             cdl, cdr = st.columns(2)
             with cdl:
-                st.download_button("⬇️ Download Cleaned CSV",
-                                   data=df.to_csv(index=False),
-                                   file_name="live_cleaned.csv", mime="text/csv")
+                st.download_button("⬇️ Download Cleaned CSV", data=df.to_csv(index=False), file_name="live_cleaned.csv", mime="text/csv")
             with cdr:
                 raw_df = st.session_state.live_data.copy()
-                st.download_button("⬇️ Download Raw Ticks CSV",
-                                   data=raw_df[["timestamp","raw"]].to_csv(index=False),
-                                   file_name="live_raw_ticks.csv", mime="text/csv")
+                st.download_button("⬇️ Download Raw Ticks CSV", data=raw_df[["timestamp","raw"]].to_csv(index=False), file_name="live_raw_ticks.csv", mime="text/csv")
 
         with ph_pos.container():
-            if st.session_state.position:
-                st.info(f"🟢 Open Position: Entry ₹{st.session_state.position['entry_price']:.2f} "
-                        f"at {st.session_state.position['entry_time']}")
-            else:
-                st.info("⚪ No open position")
+            st.info(f"🟢 Open Position: Entry ₹{st.session_state.position['entry_price']:.2f} at {st.session_state.position['entry_time']}"
+                    if st.session_state.position else "⚪ No open position")
 
         with ph_trades.container():
             if st.session_state.trades:
@@ -1413,31 +1416,23 @@ with tab2:
 
         return processed
 
-    # ---- live render loop (always rerun when data arrives) ----
+    # ========= Live render loop (rerun when data arrives) =========
     processed_rows = render_dashboard_once()
     now = time.time()
     should_rerun = False
-
-    # Always rerun when we processed any rows (fresh data)
     if processed_rows and processed_rows > 0:
         should_rerun = True
-    # Otherwise, idle-rerun only if the user enabled auto-update
     elif st.session_state.get("run_live", False) and st.session_state.get("breeze") is not None:
         if now - st.session_state.last_render_ts >= IDLE_REFRESH_SEC:
             should_rerun = True
-
     if should_rerun:
         st.session_state.last_render_ts = now
         time.sleep(RENDER_SLEEP_SEC)
         st.rerun()
 
-    # ---- raw preview + logs ----
+    # ========= Raw preview + log DL =========
     st.subheader("🟢 Raw Tick Preview (last 10)")
-    if st.session_state.last_ticks:
-        st.json(st.session_state.last_ticks[-10:])
-    else:
-        st.write("⚙️ Waiting for ticks…")
-
+    st.json(st.session_state.last_ticks[-10:]) if st.session_state.last_ticks else st.write("⚙️ Waiting for ticks…")
     if st.button("📥 Download Logs"):
         try:
             with open("live_trading.log", "r") as f:
