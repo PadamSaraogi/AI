@@ -784,11 +784,7 @@ with tab2:
     # ---- shared resources (persist across reruns) ----
     @st.cache_resource
     def get_stream_bus():
-        """
-        Returns the same objects across reruns:
-          - tick_queue (thread-safe)
-          - seq: monotonic counter for unique timestamp bumps
-        """
+        """Same objects across reruns: tick_queue + monotonic seq."""
         import queue
         return {"tick_queue": queue.Queue(), "seq": itertools.count(1)}
 
@@ -807,7 +803,7 @@ with tab2:
         "auto_trade": True,
         "conf_threshold": 0.55,
         "adx_target_mult": 0.0,    # 0 disables ADX gate
-        "trail_mult": 0.0,         # placeholder if you add trailing stops later
+        "trail_mult": 0.0,
         "time_limit": 0,           # minutes; 0 disables
         "last_action_signal": None,
         "last_decision": None,
@@ -890,7 +886,7 @@ with tab2:
         # unique micro-bump so reruns never collapse same timestamps
         try:
             seq = next(shared["seq"])
-            ts = ts + pd.to_timedelta(seq % 1_000_000, unit="us")
+            ts = ts + pd.to_datetime(f"0 days 00:00:{seq % 1_000_000 / 1_000_000:.6f}")
         except Exception:
             ts = pd.to_datetime(time.time_ns(), unit="ns", utc=True, errors="coerce")
 
@@ -983,7 +979,6 @@ with tab2:
         if model is None or df.empty: return None, None
         req = list(getattr(model, "feature_names_in_", [])) or \
               ['ema_20','ema_50','ATR','RSI','ADX14','bb_width','hour_of_day','return_1h','volume_spike_ratio']
-        # require columns present (volume_spike_ratio can be NaN; just needs to exist)
         if any(c not in df.columns for c in req): return None, None
 
         latest = df.dropna(subset=[c for c in req if c != "volume_spike_ratio"])
@@ -1091,7 +1086,6 @@ with tab2:
                 pred, conf = predict_signal(st.session_state.model, df)
                 sig = _norm_signal(pred)
 
-                # helpers
                 def adx_gate_ok(dff):
                     if "ADX14" not in dff.columns or st.session_state.adx_target_mult <= 0:
                         return True
@@ -1170,58 +1164,87 @@ with tab2:
             st.toggle("🔁 Auto-update charts (continuous refresh)", key="run_live",
                       value=st.session_state.get("run_live", False))
 
-    # ---- Grid Search → Live Thresholds panel ----
-    with st.expander("🧪 Grid Search → Live Thresholds", expanded=True):
-        grid_file = st.file_uploader("Upload grid_search_results_*.csv", type=["csv"], key="gsu")
-        import pandas as pd
-        if grid_file is not None:
-            gdf = pd.read_csv(grid_file)
-            rename_map = {
-                "ml_thresh":"ml_threshold", "ml_prob_threshold":"ml_threshold", "confidence_threshold":"ml_threshold",
-                "adx_mult":"adx_target_mult", "adx_gate_mult":"adx_target_mult",
-                "trail":"trail_mult",
-                "duration_limit":"time_limit", "hold_minutes":"time_limit",
-                "pnl":"total_pnl", "max_dd":"max_drawdown", "trades":"trade_count",
-            }
-            gdf = gdf.rename(columns={k:v for k,v in rename_map.items() if k in gdf.columns})
-            must = []
-            if "total_pnl" in gdf.columns: must.append("total_pnl")
-            if "max_drawdown" in gdf.columns: must.append("max_drawdown")
-            if must:
+    # ===== Grid Search + Optional Historical Seed =====
+    with st.expander("🧪 Grid Search & Seeding (optional)", expanded=True):
+        colA, colB = st.columns(2)
+
+        # ---- A) Grid search CSV: set thresholds live ----
+        with colA:
+            grid_file = st.file_uploader("Upload grid_search_results_*.csv", type=["csv"], key="gsu")
+
+            st.session_state.setdefault("conf_threshold", st.session_state.conf_threshold)
+            st.session_state.setdefault("adx_target_mult", st.session_state.adx_target_mult)
+            st.session_state.setdefault("trail_mult", st.session_state.trail_mult)
+            st.session_state.setdefault("time_limit", st.session_state.time_limit)
+
+            if grid_file is not None:
+                gdf = pd.read_csv(grid_file)
+                rename_map = {
+                    "ml_thresh":"ml_threshold", "ml_prob_threshold":"ml_threshold", "confidence_threshold":"ml_threshold",
+                    "adx_mult":"adx_target_mult", "adx_gate_mult":"adx_target_mult",
+                    "trail":"trail_mult",
+                    "duration_limit":"time_limit", "hold_minutes":"time_limit",
+                    "pnl":"total_pnl", "max_dd":"max_drawdown", "trades":"trade_count",
+                }
+                gdf = gdf.rename(columns={k:v for k,v in rename_map.items() if k in gdf.columns})
                 sort_cols = ["total_pnl"] + (["max_drawdown"] if "max_drawdown" in gdf.columns else [])
                 sort_asc  = [False] + ([True] if "max_drawdown" in gdf.columns else [])
                 gdf_sorted = gdf.sort_values(sort_cols, ascending=sort_asc, na_position="last").reset_index(drop=True)
-                top = gdf_sorted.head(10).copy()
-                display_cols = [c for c in ["ml_threshold","adx_target_mult","trail_mult","time_limit",
-                                            "total_pnl","max_drawdown","trade_count"] if c in top.columns]
-                st.write("Top 10 configs by objective:")
-                st.dataframe(top[display_cols])
-                idx = st.selectbox("Pick a row to apply", options=range(len(top)), format_func=lambda i: f"Row {i}")
-                best = top.iloc[int(idx)]
-                if "ml_threshold" in best.index: st.session_state.conf_threshold = float(best["ml_threshold"])
-                if "adx_target_mult" in best.index: st.session_state.adx_target_mult = float(best["adx_target_mult"])
-                if "trail_mult" in best.index: st.session_state.trail_mult = float(best["trail_mult"])
-                if "time_limit" in best.index: st.session_state.time_limit = int(best["time_limit"])
+
+                st.write("Top candidates:")
+                show_cols = [c for c in ["ml_threshold","adx_target_mult","trail_mult","time_limit",
+                                         "total_pnl","max_drawdown","trade_count"] if c in gdf_sorted.columns]
+                st.dataframe(gdf_sorted.head(10)[show_cols])
+
+                idx = st.selectbox("Pick a row to apply", options=range(min(10, len(gdf_sorted))), format_func=lambda i: f"Row {i}")
+                best = gdf_sorted.iloc[int(idx)]
+                if "ml_threshold" in best: st.session_state.conf_threshold = float(best["ml_threshold"])
+                if "adx_target_mult" in best: st.session_state.adx_target_mult = float(best["adx_target_mult"])
+                if "trail_mult" in best: st.session_state.trail_mult = float(best["trail_mult"])
+                if "time_limit" in best: st.session_state.time_limit = int(best["time_limit"])
                 st.success(
                     f"Applied → conf ≥ {st.session_state.conf_threshold:.2f} | "
                     f"ADX × {st.session_state.adx_target_mult:.2f} | "
                     f"trail × {st.session_state.trail_mult:.2f} | "
                     f"time limit {st.session_state.time_limit}m"
                 )
-            else:
-                st.info("Grid file loaded, but could not find `total_pnl` (and optionally `max_drawdown`) to rank.")
 
-        # manual overrides (always visible)
-        st.session_state.conf_threshold = st.slider(
-            "Model confidence threshold", 0.50, 0.95, float(st.session_state.conf_threshold), 0.01
-        )
-        st.session_state.adx_target_mult = st.slider(
-            "ADX gate multiplier", 0.0, 3.0, float(st.session_state.adx_target_mult), 0.1
-        )
-        st.session_state.time_limit = st.number_input(
-            "Max holding time (minutes, 0=disabled)", min_value=0, value=int(st.session_state.time_limit), step=1
-        )
-        st.checkbox("Enable Auto-Trade (apply decisions to position state)", key="auto_trade", value=True)
+            # manual knobs
+            st.session_state.conf_threshold = st.slider(
+                "Model confidence threshold", 0.50, 0.95, float(st.session_state.conf_threshold), 0.01
+            )
+            st.session_state.adx_target_mult = st.slider(
+                "ADX gate multiplier", 0.0, 3.0, float(st.session_state.adx_target_mult), 0.1
+            )
+            st.session_state.time_limit = st.number_input(
+                "Max holding time (minutes, 0 = disabled)", min_value=0, value=int(st.session_state.time_limit), step=1
+            )
+            st.checkbox("Enable Auto-Trade", key="auto_trade", value=st.session_state.get("auto_trade", True))
+
+        # ---- B) Historical 1m OHLC seed: fill early indicator windows ----
+        with colB:
+            seed_file = st.file_uploader("Upload 1-minute OHLC seed (CSV)", type=["csv"], key="seed")
+            st.caption("Expected columns: timestamp, open, high, low, close, (volume optional)")
+
+            if seed_file is not None:
+                seed = pd.read_csv(seed_file)
+                # minimal normalization
+                for c in list(seed.columns):
+                    if c.lower() == "datetime": seed.rename(columns={c: "timestamp"}, inplace=True)
+                seed["timestamp"] = pd.to_datetime(seed["timestamp"], utc=True, errors="coerce")
+                seed = seed.dropna(subset=["timestamp"]).sort_values("timestamp")
+                seed_df = pd.DataFrame({
+                    "timestamp": seed["timestamp"],
+                    "last_traded_price": pd.to_numeric(seed["close"], errors="coerce"),
+                    "volume": pd.to_numeric(seed.get("volume", 0), errors="coerce").fillna(0),
+                    "raw": "seed"
+                }).dropna(subset=["last_traded_price"])
+
+                st.session_state.live_data = pd.concat(
+                    [seed_df, st.session_state.live_data], ignore_index=True
+                ).tail(MAX_WINDOW_SIZE).reset_index(drop=True)
+                st.session_state.live_data = calculate_indicators_live(st.session_state.live_data.copy())
+                st.success(f"Seeded {len(seed_df)} bars → indicators ready sooner (ADX/BB/return_1h).")
 
         # status chip
         last_dec = st.session_state.get("last_decision")
