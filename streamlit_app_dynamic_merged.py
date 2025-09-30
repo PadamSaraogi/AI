@@ -2,7 +2,7 @@ import itertools
 import json
 import os
 import streamlit as st
-import tickbus  
+import tickbus
 import pandas as pd
 import numpy as np
 import urllib.parse
@@ -18,13 +18,13 @@ import datetime
 import threading
 import queue
 from breeze_connect import BreezeConnect
-import streamlit as st
-import pandas as pd
 import ta
 import sys
 import joblib
 import time
 import io
+import pytz  # <<< NEW
+IST = pytz.timezone("Asia/Kolkata")  # <<< NEW (Gurgaon/India standard time)
 
 st.set_page_config(layout="wide")
 st.markdown("""
@@ -38,7 +38,7 @@ st.markdown("""
 tab1, tab2 = st.tabs(["Backtesting", "Live Trading"])
 
 with tab1:
-   
+
     # Sidebar: Upload and Inputs
     st.sidebar.header("Upload Data Files")
     signal_files = st.sidebar.file_uploader(
@@ -47,10 +47,10 @@ with tab1:
         "Upload grid_search_results CSVs (one per stock)", type="csv", accept_multiple_files=True)
     total_portfolio_capital = st.sidebar.number_input("Total Portfolio Capital (₹)", min_value=10000, value=100000)
     risk_per_trade = st.sidebar.slider("Risk per Trade (%)", min_value=0.1, max_value=10.0, value=1.0, step=0.1) / 100
-    
+
     def extract_symbol(fname):
         return fname.split('_')[-1].split('.')[0].lower()
-    
+
     stock_data = {}
     if signal_files and grid_files:
         signal_symbols = [extract_symbol(f.name) for f in signal_files]
@@ -62,16 +62,16 @@ with tab1:
                 df_signals.set_index('datetime', inplace=True)
                 df_grid = pd.read_csv(grid_file)
                 stock_data[symbol] = {'signals': df_signals, 'grid': df_grid}
-    
+
     symbols_list = list(stock_data.keys())
     n_stocks = len(symbols_list)
-    
+
     tabs = st.tabs([
         "Portfolio Overview",
         "Per Symbol Analysis",
         "All Equity Curves"
     ])
-    
+
     # Portfolio Overview Tab
     with tabs[0]:
         if n_stocks == 0:
@@ -99,15 +99,15 @@ with tab1:
                     trades_df['symbol'] = symbol
                     all_trades[symbol] = trades_df
                     all_equity_curves[symbol] = equity_curve
-    
+
                 # Portfolio equity aggregation
                 portfolio_equity = None
                 for eq in all_equity_curves.values():
                     portfolio_equity = eq if portfolio_equity is None else portfolio_equity.add(eq, fill_value=0)
-    
+
                 total_trades = sum([len(t) for t in all_trades.values()])
                 total_net_pnl = sum([t['net_pnl'].sum() for t in all_trades.values()])
-    
+
                 # Portfolio-wide metrics
                 if portfolio_equity is not None:
                     daily_returns = portfolio_equity.pct_change().fillna(0)
@@ -126,7 +126,7 @@ with tab1:
                         portfolio_return = 0.0
                     portfolio_buy_hold_final_value = 0
                     buy_and_hold_start_capital = capital_per_stock * len(included_symbols) if included_symbols else 0
-                    
+
                     for symbol in included_symbols:
                         trades_df = all_trades[symbol]
                         signals = stock_data[symbol]["signals"].sort_index()
@@ -136,31 +136,31 @@ with tab1:
                         last_time = trades_df['exit_time'].values[-1]
                         first_time_ts = pd.to_datetime(first_time)
                         last_time_ts = pd.to_datetime(last_time)
-                    
+
                         start_idx = signals.index.get_indexer([first_time_ts], method='nearest')[0]
                         end_idx = signals.index.get_indexer([last_time_ts], method='nearest')[0]
-                    
+
                         start_price = signals.iloc[start_idx]['close']
                         end_price = signals.iloc[end_idx]['close']
-                    
+
                         qty = int(capital_per_stock // start_price)
                         leftover_cash = capital_per_stock - qty * start_price
-                    
+
                         final_value = qty * end_price + leftover_cash
                         portfolio_buy_hold_final_value += final_value
-                    
+
                     if buy_and_hold_start_capital > 0:
                         buy_and_hold_return = (portfolio_buy_hold_final_value / buy_and_hold_start_capital) - 1
                     else:
                         buy_and_hold_return = 0.0
                     all_trades_concat = pd.concat(all_trades.values()) if all_trades else pd.DataFrame()
-    
+
                     if not all_trades_concat.empty:
                         win_rate = (all_trades_concat['net_pnl'] > 0).mean()
                     else:
                         win_rate = 0.0
                     all_trades_concat = pd.concat(all_trades.values()) if all_trades else pd.DataFrame()
-    
+
                     if not all_trades_concat.empty:
                         expectancy = all_trades_concat['net_pnl'].mean()
                     else:
@@ -168,33 +168,33 @@ with tab1:
                     adjusted_return = (portfolio_return - 1) * 100
                     initial_value = 0
                     final_value = 0
-                    
+
                     for symbol in included_symbols:
                         trades_df = all_trades[symbol]
                         if trades_df.empty:
                             continue
                         initial_value += capital_per_stock
                         final_value += trades_df['capital_after_trade'].iloc[-1]  # final symbol value
-                    
+
                     if initial_value > 0:
                         increase_percent = ((total_net_pnl) / total_portfolio_capital) * 100
                     else:
                         increase_percent = 0.0
                 else:
                     max_drawdown = sharpe = sortino = volatility = np.nan
-    
+
                 st.markdown("### Portfolio Key Metrics")
                 r1c1, r1c2, r1c3 = st.columns(3)
                 r2c1, r2c2, r2c3 = st.columns(3)
-                
+
                 r1c1.metric("Total Trades", f"{total_trades}")
                 r1c2.metric("Portfolio Value (₹)", f"₹{total_net_pnl + total_portfolio_capital:,.2f}")
-                r1c3.metric("Returns (%)", f"{increase_percent:.2f}%")    
-    
+                r1c3.metric("Returns (%)", f"{increase_percent:.2f}%")
+
                 r2c1.metric("Buy & Hold Returns (%)", f"{buy_and_hold_return*100:.2f}%")
                 r2c2.metric("Win Rate (%)", f"{win_rate*100:.2f}%")
                 r2c3.metric("Expectancy (₹/Trade)", f"₹{expectancy:,.2f}")
-    
+
                 all_trades_combined = pd.concat(all_trades.values()).sort_values("exit_time")
                 if not all_trades_combined.empty:
                     cum = 0
@@ -202,7 +202,7 @@ with tab1:
                     for pnl in all_trades_combined["net_pnl"]:
                         bottoms.append(cum)
                         cum += pnl
-    
+
                     qty_map = {}
                     for symbol in included_symbols:
                         trades_df = all_trades[symbol]
@@ -215,10 +215,10 @@ with tab1:
                         start_idx = signals.index.get_indexer([first_time_ts], method='nearest')[0]
                         start_price = signals.iloc[start_idx]['close']
                         qty_map[symbol] = int(capital_per_stock // start_price)
-    
+
                     buy_hold_pnl_over_time = []
                     initial_portfolio_value = capital_per_stock * len(included_symbols)
-    
+
                     for _, row in all_trades_combined.iterrows():
                         timestamp = row['exit_time']
                         ts = pd.to_datetime(timestamp)
@@ -236,7 +236,7 @@ with tab1:
                             portfolio_value += qty * current_price
                         buy_hold_pnl = portfolio_value - initial_portfolio_value
                         buy_hold_pnl_over_time.append(buy_hold_pnl)
-    
+
                     fig_water, ax_water = plt.subplots(figsize=(12, 4))
                     ax_water.bar(
                         range(len(all_trades_combined)),
@@ -257,7 +257,7 @@ with tab1:
                     ax_water.set_title("Trade-by-Trade Net PnL Contribution (Portfolio) with Buy & Hold Over Time")
                     ax_water.legend()
                     st.pyplot(fig_water)
-    
+
                 final_values = [
                     all_trades[s]["capital_after_trade"].iloc[-1] if not all_trades[s].empty else capital_per_stock
                     for s in included_symbols
@@ -270,7 +270,7 @@ with tab1:
                 )])
                 fig_alloc.update_layout(title="Portfolio Allocation by Final Capital")
                 st.plotly_chart(fig_alloc)
-    
+
                 st.subheader("Portfolio Drawdown")
                 fig_dd, ax_dd = plt.subplots(figsize=(10, 4))
                 drawdowns.plot(ax=ax_dd, color="red")
@@ -278,7 +278,7 @@ with tab1:
                 ax_dd.set_xlabel("Date")
                 ax_dd.grid(True)
                 st.pyplot(fig_dd)
-    
+
                 # Portfolio leaderboard
                 summary_data = []
                 for symbol in included_symbols:
@@ -298,16 +298,16 @@ with tab1:
                         }
                     )
                 df_summary = pd.DataFrame(summary_data)
-                            
+
                 # Collect and align daily returns for all stocks
                 returns_df = pd.DataFrame()
                 for symbol, eq_curve in all_equity_curves.items():
                     returns_df[symbol.upper()] = eq_curve.pct_change()
-                
+
                 returns_corr = returns_df.corr()
-                
+
                 st.markdown("### Correlation Heatmap of Daily Returns")
-                
+
                 # Ensure all values are finite and matrix isn't empty
                 if not returns_corr.empty and np.isfinite(returns_corr.values).all():
                     fig_corr, ax_corr = plt.subplots(figsize=(8, 6))
@@ -316,16 +316,16 @@ with tab1:
                     st.pyplot(fig_corr)
                 else:
                     st.info("Not enough data to display correlation heatmap. Please upload several stocks with sufficient history.")
-    
+
                 window = 21  # About a month
                 risk_free = 0  # Change if you'd like
-                
+
                 if portfolio_equity is not None:
                     rets = portfolio_equity.pct_change().dropna()
                     rolling_sharpe = rets.rolling(window).mean() / rets.rolling(window).std() * np.sqrt(252)
                     rolling_downside = rets.where(rets < 0, 0)
                     rolling_sortino = rets.rolling(window).mean() / rolling_downside.rolling(window).std() * np.sqrt(252)
-                
+
                     st.markdown("### Rolling Sharpe & Sortino Ratios (Portfolio)")
                     fig, ax = plt.subplots(figsize=(12, 5))
                     rolling_sharpe.plot(ax=ax, label='Sharpe Ratio')
@@ -339,18 +339,18 @@ with tab1:
                     st.pyplot(fig)
                 else:
                     st.info("Portfolio equity curve not available for rolling ratios.")
-    
+
                 import plotly.express as px
-                
+
                 st.markdown("### Top Contributors to Portfolio PnL - Interactive Chart & Highlights")
-                
+
                 # Prepare data as before
                 contrib_list = []
                 total_pnl = sum(
-                    td['net_pnl'].sum() for td in all_trades.values() 
+                    td['net_pnl'].sum() for td in all_trades.values()
                     if not td.empty and 'net_pnl' in td.columns
                 )
-                
+
                 for symbol, trades_df in all_trades.items():
                     net_pnl = trades_df['net_pnl'].sum() if not trades_df.empty and 'net_pnl' in trades_df.columns else 0
                     contrib_pct = (net_pnl / total_pnl * 100) if total_pnl != 0 else 0
@@ -363,13 +363,13 @@ with tab1:
                         'Trades': num_trades,
                         'Avg Trade PnL': avg_pnl
                     })
-                
+
                 df_contrib = pd.DataFrame(contrib_list)
                 df_contrib.sort_values('Contribution (%)', ascending=True, inplace=True)  # Ascending for horizontal bar
-                
+
                 # Assign colors based on Net PnL sign
                 df_contrib['Color'] = df_contrib['Net PnL'].apply(lambda x: 'green' if x >= 0 else 'red')
-                
+
                 # 1. Interactive Horizontal Bar Chart
                 fig = px.bar(
                     df_contrib,
@@ -394,12 +394,12 @@ with tab1:
                     margin=dict(l=0, r=20, t=40, b=40)
                 )
                 st.plotly_chart(fig, use_container_width=True)
-                
+
                 # 2. Highlight Top 5 Contributors with Cards & Progress Bars
                 st.markdown("### Top 5 Contributors Quick Stats")
                 top_n = min(5, len(df_contrib))
                 df_top = df_contrib.sort_values('Contribution (%)', ascending=False).head(top_n).reset_index(drop=True)
-                
+
                 for i in range(top_n):
                     col1, col2 = st.columns([1, 4])
                     with col1:
@@ -413,8 +413,7 @@ with tab1:
                         f"Net PnL: ₹{df_top.iloc[i]['Net PnL']:.2f} | Trades: {df_top.iloc[i]['Trades']} | "
                         f"Avg Trade PnL: ₹{df_top.iloc[i]['Avg Trade PnL']:.2f}"
                     )
-    
-    
+
     # Per Symbol Analysis Tab
     with tabs[1]:
         if n_stocks == 0:
@@ -430,13 +429,13 @@ with tab1:
                 risk_per_trade=risk_per_trade,
             )
             st.write(f"Number of trades: {len(trades_df)}")   # Debug line
-    
+
             win_rate = (trades_df["net_pnl"] > 0).mean() * 100 if not trades_df.empty else 0
             c1, c2, c3 = st.columns(3)
             c1.metric("Total Trades", len(trades_df))
             c2.metric("Win Rate (%)", f"{win_rate:.2f}")
             c3.metric("Net PnL (₹)", f"{trades_df['net_pnl'].sum():,.2f}" if not trades_df.empty else "0.00")
-    
+
             st.subheader(f"{symbol_select.upper()} Equity Curve")
             fig_eq, ax = plt.subplots(figsize=(10, 4))
             equity_curve.plot(ax=ax, color="green", linewidth=2)
@@ -444,10 +443,10 @@ with tab1:
             ax.set_ylabel("Capital (₹)")
             ax.grid(True)
             st.pyplot(fig_eq)
-    
+
             st.subheader(f"Candlestick Chart with Trades ({symbol_select.upper()})")
             signals_df = stock_data[symbol_select]['signals']
-            
+
             if {'open', 'high', 'low', 'close'}.issubset(signals_df.columns):
                 fig_candle = go.Figure(data=[go.Candlestick(
                     x=signals_df.index,
@@ -456,7 +455,7 @@ with tab1:
                     low=signals_df['low'],
                     close=signals_df['close']
                 )])
-            
+
                 fig_candle.add_trace(go.Scatter(
                     x=trades_df['entry_time'],
                     y=trades_df['entry_price'],
@@ -464,7 +463,7 @@ with tab1:
                     marker=dict(symbol='triangle-up', color='green', size=9),
                     name='Buy Entry'
                 ))
-            
+
                 fig_candle.add_trace(go.Scatter(
                     x=trades_df['exit_time'],
                     y=trades_df['final_exit_price'],
@@ -472,7 +471,7 @@ with tab1:
                     marker=dict(symbol='triangle-down', color='red', size=9),
                     name='Exit'
                 ))
-            
+
                 fig_candle.update_layout(
                     title=f"{symbol_select.upper()} Price & Trades",
                     xaxis_title="Date",
@@ -480,10 +479,9 @@ with tab1:
                     autosize=True,
                     margin=dict(l=0, r=0, t=30, b=0)
                 )
-            
+
                 st.plotly_chart(fig_candle, use_container_width=True)
-    
-    
+
             st.subheader(f"{symbol_select.upper()} Drawdown")
             eq_cumret = equity_curve / equity_curve.iloc[0]
             drawdowns = eq_cumret / eq_cumret.cummax() - 1
@@ -493,22 +491,22 @@ with tab1:
             ax_dd.set_xlabel("Date")
             ax_dd.grid(True)
             st.pyplot(fig_dd)
-    
-            # Convert to datetime if needed
+
+            # Convert to datetime if needed (keep timezone-naive here since source is historical)
             trades_df['entry_time'] = pd.to_datetime(trades_df['entry_time'])
             trades_df['exit_time'] = pd.to_datetime(trades_df['exit_time'])
-            
+
             # Filter for intraday trades only (start and end on same day)
             intraday_trades_df = trades_df[
                 trades_df['entry_time'].dt.date == trades_df['exit_time'].dt.date
             ].copy()
-    
+
             st.write(f"Number of intraday trades: {len(intraday_trades_df)}")
-    
+
             if not intraday_trades_df.empty:
                 st.subheader(f"Intraday Trades for {symbol_select.upper()}")
                 st.dataframe(intraday_trades_df.sort_values('exit_time').reset_index(drop=True))
-                
+
                 # Optional CSV download
                 csv_download = intraday_trades_df.to_csv(index=False).encode('utf-8')
                 st.download_button(
@@ -519,8 +517,7 @@ with tab1:
                 )
             else:
                 st.info("No intraday trade data available for selected symbol.")
-    
-    
+
     # All Equity Curves Tab
     with tabs[2]:
         if n_stocks == 0:
@@ -529,7 +526,7 @@ with tab1:
             capital_per_stock = total_portfolio_capital // n_stocks
             all_trades = {}
             all_equity_curves = {}
-    
+
             # Run backtest per stock and collect trades & equity curves
             for symbol in symbols_list:
                 trades_df, eq_curve = run_backtest_simulation(
@@ -539,11 +536,10 @@ with tab1:
                 )
                 all_trades[symbol] = trades_df
                 all_equity_curves[symbol] = eq_curve
-    
-    
+
             # --- 5. New: Interactive Normalized Equity Curves Including Portfolio (Plotly) ---
             fig5 = go.Figure()
-    
+
             for symbol, eq_curve in all_equity_curves.items():
                 eq_norm = eq_curve / eq_curve.iloc[0] * 100
                 fig5.add_trace(go.Scatter(
@@ -554,8 +550,9 @@ with tab1:
                     line=dict(width=2),
                     hovertemplate="%{x|%Y-%m-%d %H:%M}<br>%{y:.2f}"
                 ))
-    
-            if portfolio_equity is not None and len(portfolio_equity) > 1:
+
+            # portfolio_equity is defined in earlier tab; safe guard if present
+            if 'portfolio_equity' in locals() and portfolio_equity is not None and len(portfolio_equity) > 1:
                 portfolio_equity_norm = portfolio_equity / portfolio_equity.iloc[0] * 100
                 fig5.add_trace(go.Scatter(
                     x=portfolio_equity_norm.index,
@@ -565,7 +562,7 @@ with tab1:
                     line=dict(width=2, color='white'),
                     hovertemplate="Portfolio<br>%{x|%Y-%m-%d %H:%M}<br>%{y:.2f}"
                 ))
-    
+
             fig5.update_layout(
                 title="Normalized Equity Curves (Including Portfolio)",
                 xaxis_title="Date",
@@ -576,18 +573,18 @@ with tab1:
                 template="plotly_white",
             )
             st.plotly_chart(fig5, use_container_width=True)
-    
+
             perf_summary = []
             for symbol, eq_curve in all_equity_curves.items():
                 total_return_pct = (eq_curve.iloc[-1] / eq_curve.iloc[0] - 1) * 100 if len(eq_curve) > 1 else 0
                 drawdown_pct = ((eq_curve / eq_curve.cummax()) - 1).min() * 100 if len(eq_curve) > 1 else 0
                 daily_rets = eq_curve.pct_change().dropna()
                 sharpe_ratio = (daily_rets.mean() / daily_rets.std()) * np.sqrt(252) if daily_rets.std() > 0 else np.nan
-            
+
                 days = (eq_curve.index[-1] - eq_curve.index[0]).days
                 cagr = ((eq_curve.iloc[-1] / eq_curve.iloc[0]) ** (365 / days) - 1) * 100 if days > 0 else 0
                 calmar = cagr / abs(drawdown_pct) if drawdown_pct != 0 else np.nan
-            
+
                 perf_summary.append({
                     "Symbol": symbol.upper(),
                     "CAGR (%)": cagr,
@@ -596,14 +593,14 @@ with tab1:
                     "Calmar Ratio": calmar,
                     "Sharpe Ratio": sharpe_ratio,
                 })
-            
+
             df_perf = pd.DataFrame(perf_summary)
             for col in ["CAGR (%)", "Total Return (%)", "Max Drawdown (%)", "Calmar Ratio", "Sharpe Ratio"]:
                 df_perf[col] = df_perf[col].astype(float).map("{:.2f}".format)
-            
+
             st.markdown("### Advanced Performance Summary")
             st.dataframe(df_perf)
-    
+
             def calculate_streaks(profits):
                 streaks = []
                 cur_streak = 0
@@ -619,28 +616,28 @@ with tab1:
                         prev_win = win
                 streaks.append((prev_win, cur_streak))
                 return streaks
-            
+
             if all_trades:
                 all_trades_concat = pd.concat(all_trades.values())
                 profits = all_trades_concat['net_pnl'] > 0
                 streaks = calculate_streaks(all_trades_concat['net_pnl'].values)
-                
+
                 st.markdown("### Win/Loss Streaks")
                 wins = [length for win, length in streaks if win]
                 losses = [length for win, length in streaks if not win]
-                
+
                 fig, ax = plt.subplots(figsize=(12, 4))
-                ax.hist(wins, bins=range(1, max(wins)+2), alpha=0.7, label='Winning Streaks', color='green')
-                ax.hist(losses, bins=range(1, max(losses)+2), alpha=0.7, label='Losing Streaks', color='red')
+                ax.hist(wins, bins=range(1, max(wins)+2) if wins else [1,2], alpha=0.7, label='Winning Streaks', color='green')
+                ax.hist(losses, bins=range(1, max(losses)+2) if losses else [1,2], alpha=0.7, label='Losing Streaks', color='red')
                 ax.set_xlabel('Streak Length (Number of Trades)')
                 ax.set_ylabel('Frequency')
                 ax.legend()
                 st.pyplot(fig)
             else:
-                    st.info("No trade data for streak analysis.")
-            
+                st.info("No trade data for streak analysis.")
+
             st.markdown("### Outlier Trades - Top Winning & Losing Intraday Trades")
-            
+
             all_trades_combined = []
             for symbol, trades_df in all_trades.items():
                 if trades_df.empty:
@@ -648,19 +645,19 @@ with tab1:
                 temp_df = trades_df.copy()
                 temp_df['Symbol'] = symbol.upper()
                 all_trades_combined.append(temp_df)
-            
+
             if all_trades_combined:
                 combined_df = pd.concat(all_trades_combined)
-            
+
                 combined_df['entry_time'] = pd.to_datetime(combined_df['entry_time'])
                 combined_df['exit_time'] = pd.to_datetime(combined_df['exit_time'])
                 combined_df = combined_df[combined_df['entry_time'].dt.date == combined_df['exit_time'].dt.date]
-            
+
                 combined_df['entry_price_safe'] = combined_df['entry_price'] if 'entry_price' in combined_df.columns else pd.NA
-            
+
                 exit_price = combined_df['exit_price'] if 'exit_price' in combined_df.columns else None
                 final_exit_price = combined_df['final_exit_price'] if 'final_exit_price' in combined_df.columns else None
-            
+
                 if exit_price is not None and final_exit_price is not None:
                     combined_df['exit_price_safe'] = exit_price.fillna(final_exit_price)
                 elif exit_price is not None:
@@ -669,13 +666,13 @@ with tab1:
                     combined_df['exit_price_safe'] = final_exit_price
                 else:
                     combined_df['exit_price_safe'] = pd.NA
-            
+
                 combined_df['entry_time_fmt'] = combined_df['entry_time'].dt.strftime('%Y-%m-%d %H:%M')
                 combined_df['exit_time_fmt'] = combined_df['exit_time'].dt.strftime('%Y-%m-%d %H:%M')
-            
+
                 top_winning = combined_df.nlargest(5, 'net_pnl').reset_index(drop=True)
                 top_losing = combined_df.nsmallest(5, 'net_pnl').reset_index(drop=True)
-            
+
                 css = """
                 <style>
                 .card-container {
@@ -713,7 +710,7 @@ with tab1:
                 .card.loser:hover {
                     box-shadow: 0 0 10px #ff1744, 0 0 20px #ff1744, 0 0 40px #ff1744;
                 }
-    
+
                 .card h4 {
                     margin-bottom: 15px;
                     font-weight: 700;
@@ -728,7 +725,7 @@ with tab1:
                 }
                 </style>
                 """
-            
+
                 def make_card_html(trade, is_winner=True):
                     card_class = "card" if is_winner else "card loser"
                     emoji = "🏆" if is_winner else "⚠️"
@@ -736,7 +733,7 @@ with tab1:
                     xp = trade['exit_price_safe']
                     ep_str = f"₹{ep:,.2f}" if pd.notna(ep) else "N/A"
                     xp_str = f"₹{xp:,.2f}" if pd.notna(xp) else "N/A"
-            
+
                     return f"""
                     <div class="{card_class}">
                         <h4>{emoji} {trade['Symbol']} - ₹{trade['net_pnl']:,.2f} {'Profit' if is_winner else 'Loss'}</h4>
@@ -746,7 +743,7 @@ with tab1:
                         <p><strong>Trade PnL:</strong> ₹{trade['net_pnl']:,.2f}</p>
                     </div>
                     """
-            
+
                 def render_cards(title, df, is_winner):
                     cards_html = "".join(make_card_html(df.iloc[i], is_winner) for i in range(len(df)))
                     full_html = f"""
@@ -757,10 +754,10 @@ with tab1:
                     </div>
                     """
                     components.html(full_html, height=700)
-            
+
                 render_cards("Top 5 Winning Intraday Trades", top_winning, True)
                 render_cards("Top 5 Losing Intraday Trades", top_losing, False)
-            
+
             else:
                 st.info("No intraday trades data available to display outlier trades.")
 
@@ -801,7 +798,7 @@ with tab2:
         "last_action_signal": None,
         "last_decision": None,
         "decision_history": [],
-        "allow_shorts": True,       # << enable short selling
+        "allow_shorts": True,       # enable short selling
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -814,15 +811,20 @@ with tab2:
         return pd.to_numeric(x, errors="coerce")
 
     def _parse_ts(v):
-        if v is None or (isinstance(v, float) and np.isnan(v)): return pd.NaT
+        """Parse any timestamp-ish thing and return tz-aware IST time."""
+        if v is None or (isinstance(v, float) and np.isnan(v)): 
+            # fallback: current IST time
+            return pd.Timestamp.now(tz=IST)
         ts = pd.to_datetime(v, errors="coerce", utc=True)
-        if pd.notna(ts): return ts
+        if pd.notna(ts):
+            return ts.tz_convert(IST)
+        # numeric epoch fallback
         try:
             x = float(v)
             unit = "ms" if x > 1e10 else "s"
-            return pd.to_datetime(x, unit=unit, utc=True, errors="coerce")
+            return pd.to_datetime(x, unit=unit, utc=True, errors="coerce").tz_convert(IST)
         except Exception:
-            return pd.NaT
+            return pd.Timestamp.now(tz=IST)
 
     def _to_jsonable(obj):
         try:
@@ -868,9 +870,7 @@ with tab2:
             or (t.get("created_at") if isinstance(t, dict) else None)
         )
         ts = _parse_ts(ts_raw)
-        if pd.isna(ts):
-            ts = pd.to_datetime(time.time_ns(), unit="ns", utc=True, errors="coerce")
-        # unique micro-bump per tick
+        # unique micro-bump per tick to preserve order
         try:
             seq = tickbus.next_seq()
             ts = ts + pd.to_timedelta(seq % 1_000_000, unit="us")
@@ -899,7 +899,10 @@ with tab2:
     def _compute_feature_block(df_ticks: pd.DataFrame) -> pd.DataFrame:
         if df_ticks.empty: return df_ticks
         d = df_ticks.copy()
-        d["timestamp"] = pd.to_datetime(d["timestamp"], errors="coerce", utc=True)
+        d["timestamp"] = pd.to_datetime(d["timestamp"], errors="coerce")
+        # Ensure tz-aware IST
+        if getattr(d["timestamp"].dt, "tz", None) is None:
+            d["timestamp"] = d["timestamp"].dt.tz_localize(IST)
         d = d.dropna(subset=["timestamp"]).sort_values("timestamp")
 
         bars = (
@@ -948,6 +951,10 @@ with tab2:
     def calculate_indicators_live(df: pd.DataFrame) -> pd.DataFrame:
         if df.empty: return df
         d = df.copy().sort_values("timestamp")
+        d["timestamp"] = pd.to_datetime(d["timestamp"], errors="coerce")
+        # Guarantee IST tz awareness
+        if getattr(d["timestamp"].dt, "tz", None) is None:
+            d["timestamp"] = d["timestamp"].dt.tz_localize(IST)
         d["last_traded_price"] = pd.to_numeric(d["last_traded_price"], errors="coerce").ffill()
         d["volume"] = pd.to_numeric(d["volume"], errors="coerce").fillna(0)
 
@@ -1091,7 +1098,7 @@ with tab2:
                     if pd.isna(ltp) and not st.session_state.live_data.empty:
                         ltp = pd.to_numeric(st.session_state.live_data["last_traded_price"], errors="coerce").ffill().iloc[-1]
                     rows.append({
-                        "timestamp": ts,
+                        "timestamp": ts,  # already IST tz-aware
                         "last_traded_price": _clean_num(ltp),
                         "volume": _clean_num(vol),
                         "raw": json.dumps(raw) if isinstance(raw, dict) else str(raw),
@@ -1103,7 +1110,7 @@ with tab2:
                     if bad.any():
                         base = (st.session_state.live_data["timestamp"].iloc[-1]
                                 if ("timestamp" in st.session_state.live_data.columns and not st.session_state.live_data.empty)
-                                else pd.Timestamp.utcnow().tz_localize("UTC"))
+                                else pd.Timestamp.now(tz=IST))
                         fixes = []
                         for i, is_bad in enumerate(bad):
                             if not is_bad:
@@ -1240,12 +1247,14 @@ with tab2:
             st.checkbox("Enable Auto-Trade", key="auto_trade", value=st.session_state.get("auto_trade", True))
         with colB:
             seed_file = st.file_uploader("Upload 1-minute OHLC seed (CSV)", type=["csv"], key="seed")
-            st.caption("Expected columns: timestamp, open, high, low, close, (volume optional)")
+            st.caption("Expected columns: timestamp, open, high, low, close, (volume optional) — timestamps will be interpreted in IST.")
             if seed_file is not None:
                 seed = pd.read_csv(seed_file)
                 for c in list(seed.columns):
                     if c.lower() == "datetime": seed.rename(columns={c: "timestamp"}, inplace=True)
-                seed["timestamp"] = pd.to_datetime(seed["timestamp"], utc=True, errors="coerce")
+                seed["timestamp"] = pd.to_datetime(seed["timestamp"], errors="coerce")
+                if getattr(seed["timestamp"].dt, "tz", None) is None:
+                    seed["timestamp"] = seed["timestamp"].dt.tz_localize(IST)
                 seed = seed.dropna(subset=["timestamp"]).sort_values("timestamp")
                 seed_df = pd.DataFrame({
                     "timestamp": seed["timestamp"],
@@ -1293,10 +1302,10 @@ with tab2:
     # ================= Debug tools =================
     with st.expander("🔧 Debug tools"):
         if st.button("➕ Simulate 1 tick"):
-            now = pd.Timestamp.utcnow().tz_localize("UTC")
+            now = pd.Timestamp.now(tz=IST)
             fake = {"timestamp": now.isoformat(), "last_traded_price": float(np.random.uniform(100, 120))}
             on_ticks(fake)
-            st.success("Injected one synthetic tick via on_ticks()")
+            st.success("Injected one synthetic tick via on_ticks() (IST)")
 
     # ================= Placeholders =================
     ph_metrics = st.empty(); ph_candles = st.empty(); ph_line = st.empty()
@@ -1307,7 +1316,9 @@ with tab2:
     def make_candles_with_signals(df_ticks: pd.DataFrame, trades: list, current_pos: dict | None):
         if df_ticks.empty: return go.Figure()
         d = df_ticks.copy()
-        d["timestamp"] = pd.to_datetime(d["timestamp"], utc=True, errors="coerce")
+        d["timestamp"] = pd.to_datetime(d["timestamp"], errors="coerce")
+        if getattr(d["timestamp"].dt, "tz", None) is None:
+            d["timestamp"] = d["timestamp"].dt.tz_localize(IST)
         d = d.dropna(subset=["timestamp"]).sort_values("timestamp")
         bars = (
             d.set_index("timestamp")
@@ -1332,8 +1343,8 @@ with tab2:
             fig.add_trace(go.Scatter(x=bars.index, y=series, mode="lines", name=name))
         buy_x, buy_y, sell_x, sell_y = [], [], [], []
         for t in trades or []:
-            et = pd.to_datetime(t["entry_time"], utc=True, errors="coerce")
-            xt = pd.to_datetime(t.get("exit_time"),  utc=True, errors="coerce")
+            et = pd.to_datetime(t["entry_time"], errors="coerce")
+            xt = pd.to_datetime(t.get("exit_time"),  errors="coerce")
             if pd.notna(et):
                 et_bar = bars.index.asof(et)
                 if pd.notna(et_bar): buy_x.append(et_bar); buy_y.append(bars.loc[et_bar, "open"])
@@ -1341,7 +1352,7 @@ with tab2:
                 xt_bar = bars.index.asof(xt)
                 if pd.notna(xt_bar): sell_x.append(xt_bar); sell_y.append(bars.loc[xt_bar, "close"])
         if current_pos is not None:
-            et = pd.to_datetime(current_pos["entry_time"], utc=True, errors="coerce")
+            et = pd.to_datetime(current_pos["entry_time"], errors="coerce")
             if pd.notna(et):
                 et_bar = bars.index.asof(et)
                 if pd.notna(et_bar): buy_x.append(et_bar); buy_y.append(bars.loc[et_bar, "open"])
@@ -1362,7 +1373,9 @@ with tab2:
             ph_table.info("⚙️ Connected? Wait for live ticks…")
             return processed
 
-        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        if getattr(df["timestamp"].dt, "tz", None) is None:
+            df["timestamp"] = df["timestamp"].dt.tz_localize(IST)
         df["last_traded_price"] = pd.to_numeric(df["last_traded_price"], errors="coerce").ffill()
         df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0)
         df = df.dropna(subset=["timestamp"]).sort_values("timestamp")
@@ -1389,7 +1402,7 @@ with tab2:
             c4.metric("🫀 Heartbeat", tickbus.heartbeat())
 
         with ph_candles.container():
-            st.subheader("📊 Candles + Signals")
+            st.subheader("📊 Candles + Signals (IST)")
             st.plotly_chart(make_candles_with_signals(df, st.session_state.trades, st.session_state.position), use_container_width=True)
 
         with st.expander("🛠 Live Debug", expanded=True):
@@ -1401,7 +1414,9 @@ with tab2:
             st.write(f"tickbus id: **{tickbus.BUS_ID}**")
             if not st.session_state.live_data.empty:
                 tail = st.session_state.live_data.tail(5).copy()
-                tail["timestamp"] = pd.to_datetime(tail["timestamp"], utc=True, errors="coerce")
+                tail["timestamp"] = pd.to_datetime(tail["timestamp"], errors="coerce")
+                if getattr(tail["timestamp"].dt, "tz", None) is None:
+                    tail["timestamp"] = tail["timestamp"].dt.tz_localize(IST)
                 st.dataframe(tail[["timestamp","last_traded_price","volume"]])
             st.write("Last raw tick batch:")
             if st.session_state.last_ticks:
@@ -1428,7 +1443,7 @@ with tab2:
                 else: st.info("ATR warming up…")
 
         with ph_table.container():
-            st.subheader("📝 Latest Cleaned Data")
+            st.subheader("📝 Latest Cleaned Data (IST)")
             st.dataframe(df.tail(30))
             st.subheader("📦 Raw Payloads")
             st.dataframe(st.session_state.live_data.tail(30)[["timestamp","raw"]])
@@ -1455,7 +1470,9 @@ with tab2:
             if st.session_state.equity_curve:
                 st.subheader("📈 Equity Curve (Total PnL)")
                 eq = pd.DataFrame(st.session_state.equity_curve)
-                eq["timestamp"] = pd.to_datetime(eq["timestamp"], errors="coerce", utc=True)
+                eq["timestamp"] = pd.to_datetime(eq["timestamp"], errors="coerce")
+                if getattr(eq["timestamp"].dt, "tz", None) is None:
+                    eq["timestamp"] = eq["timestamp"].dt.tz_localize(IST)
                 eq = eq.dropna(subset=["timestamp"]).sort_values("timestamp")
                 st.line_chart(eq.set_index("timestamp")["total_pnl"])
 
