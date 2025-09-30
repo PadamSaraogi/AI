@@ -767,7 +767,7 @@ with tab2:
 
     # ================= Constants & logging =================
     MAX_WINDOW_SIZE  = 15000
-    RENDER_SLEEP_SEC = 0.5
+    RENDER_SLEEP_SEC = 1
     IDLE_REFRESH_SEC = 3.0
 
     lg = logging.getLogger("LiveTradingLogger")
