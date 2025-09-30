@@ -1031,7 +1031,15 @@ with tab2:
             tickbus.hb = (tickbus.hb + 1) % 1_000_000_000
         except Exception:
             tickbus.hb = 0
-        logger.info(f"[bus {tickbus.BUS_ID}] Tick enqueued")
+        def _log_info(msg: str):
+            try:
+                logging.getLogger("LiveTradingLogger").info(msg)
+            except Exception:
+                pass
+        
+        # inside on_ticks(...)
+        _log_info(f"[bus {tickbus.BUS_ID}] Tick enqueued")
+
 
     # Rebind handler EACH run so a previously created Breeze still uses this one
     if st.session_state.get("breeze") is not None:
