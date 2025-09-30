@@ -784,9 +784,9 @@ with tab2:
     # ================= Session defaults =================
     defaults = {
         "live_data": pd.DataFrame(),
-        "position": None,
-        "trades": [],
-        "equity_curve": [],
+        "position": None,           # {"side": "long"/"short", "entry_price": float, "entry_time": ts}
+        "trades": [],               # list of closed trades dicts
+        "equity_curve": [],         # [{timestamp, total_pnl}]
         "model": None,
         "breeze": None,
         "last_ticks": [],
@@ -801,6 +801,7 @@ with tab2:
         "last_action_signal": None,
         "last_decision": None,
         "decision_history": [],
+        "allow_shorts": True,       # << enable short selling
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -857,9 +858,14 @@ with tab2:
                     t = t[k]; break
         # timestamp
         ts_raw = (
-            t.get("ltt") or t.get("last_trade_time") or t.get("exchange_time")
-            or t.get("trade_time") or t.get("time") or t.get("timestamp")
-            or t.get("datetime") or t.get("created_at") or None
+            (t.get("ltt") if isinstance(t, dict) else None)
+            or (t.get("last_trade_time") if isinstance(t, dict) else None)
+            or (t.get("exchange_time") if isinstance(t, dict) else None)
+            or (t.get("trade_time") if isinstance(t, dict) else None)
+            or (t.get("time") if isinstance(t, dict) else None)
+            or (t.get("timestamp") if isinstance(t, dict) else None)
+            or (t.get("datetime") if isinstance(t, dict) else None)
+            or (t.get("created_at") if isinstance(t, dict) else None)
         )
         ts = _parse_ts(ts_raw)
         if pd.isna(ts):
@@ -871,13 +877,10 @@ with tab2:
         except Exception:
             pass
         # price
-        price_keys = [
-            "last","Last","LAST","last_traded_price","LastTradedPrice","lastTradedPrice",
-            "ltp","LTP","lastPrice","LastPrice","close","Close","price","Price"
-        ]
         ltp = None
         if isinstance(t, dict):
-            for k in price_keys:
+            for k in ["last","Last","LAST","last_traded_price","LastTradedPrice","lastTradedPrice",
+                      "ltp","LTP","lastPrice","LastPrice","close","Close","price","Price"]:
                 if k in t and t[k] not in (None, ""):
                     ltp = t[k]; break
             if ltp is None:
@@ -898,6 +901,7 @@ with tab2:
         d = df_ticks.copy()
         d["timestamp"] = pd.to_datetime(d["timestamp"], errors="coerce", utc=True)
         d = d.dropna(subset=["timestamp"]).sort_values("timestamp")
+
         bars = (
             d.set_index("timestamp")
              .resample("1min")
@@ -913,6 +917,7 @@ with tab2:
             vol = pd.to_numeric(d["volume"], errors="coerce")
             d["volume_spike_ratio"] = (vol / vol.rolling(200, min_periods=20).mean()).astype("float64")
             return d
+
         try:
             adx = ta.trend.adx(bars["high"], bars["low"], bars["close"], window=14)
             bb  = ta.volatility.BollingerBands(bars["close"], window=20, window_dev=2)
@@ -920,9 +925,11 @@ with tab2:
         except Exception:
             adx = pd.Series(index=bars.index, dtype=float)
             bb_width = pd.Series(index=bars.index, dtype=float)
+
         ret_1h = (bars["close"] / bars["close"].shift(60) - 1.0)
         feat_cols = ["ADX14","bb_width","return_1h"]
         feat = pd.DataFrame({"ADX14": adx, "bb_width": bb_width, "return_1h": ret_1h}).sort_index()
+
         d = d.drop(columns=[c for c in feat_cols if c in d.columns], errors="ignore")
         d = pd.merge_asof(
             d.sort_values("timestamp"),
@@ -932,6 +939,7 @@ with tab2:
             direction="backward",
             allow_exact_matches=True,
         )
+
         d["hour_of_day"] = d["timestamp"].dt.hour.astype("float64")
         vol = pd.to_numeric(d["volume"], errors="coerce")
         d["volume_spike_ratio"] = (vol / vol.rolling(200, min_periods=20).mean()).astype("float64")
@@ -942,6 +950,7 @@ with tab2:
         d = df.copy().sort_values("timestamp")
         d["last_traded_price"] = pd.to_numeric(d["last_traded_price"], errors="coerce").ffill()
         d["volume"] = pd.to_numeric(d["volume"], errors="coerce").fillna(0)
+
         for base in ["ADX14","bb_width","return_1h"]:
             if base not in d.columns and f"{base}_x" in d.columns:
                 d.rename(columns={f"{base}_x": base}, inplace=True)
@@ -949,12 +958,15 @@ with tab2:
                 col = f"{base}{suf}"
                 if col in d.columns and col != base:
                     d.drop(columns=[col], inplace=True, errors="ignore")
+
         price = d["last_traded_price"]
         if len(d) >= 20: d["ema_20"] = ta.trend.ema_indicator(price, window=20)
         if len(d) >= 50: d["ema_50"] = ta.trend.ema_indicator(price, window=50)
         if len(d) >= 14:
+            # Using price for ATR hi/lo is a synthetic approximation for tick streams
             d["ATR"] = ta.volatility.average_true_range(high=price, low=price, close=price, window=14)
             d["RSI"] = ta.momentum.rsi(price, window=14)
+
         d = _compute_feature_block(d)
         return d
 
@@ -974,7 +986,8 @@ with tab2:
             classes_ = getattr(model, "classes_", None)
             buy_idx = None
             if classes_ is not None:
-                try: buy_idx = list(classes_).index(1)
+                try:
+                    buy_idx = list(classes_).index(1)
                 except Exception:
                     for i, c in enumerate(classes_):
                         if str(c).lower() in ("1","buy","long","open"): buy_idx = i; break
@@ -995,26 +1008,49 @@ with tab2:
             if s in ("sell","short","close","exit","go_short"): return -1
             return 0
 
-    # ================= Trades state =================
+    # ================= Trades state (two-sided) =================
     def update_trades(signal, price, timestamp):
+        """
+        signal: +1 = go long / close short, -1 = go short / close long
+        """
         pos = st.session_state.position
-        if signal == 1 and pos is None:
-            st.session_state.position = {"entry_price": float(price), "entry_time": timestamp}
-            lg.info(f"Open LONG @ {price} on {timestamp}")
-        elif signal == -1 and pos is not None:
-            pnl = float(price) - float(pos["entry_price"])
+        side = pos["side"] if pos else None
+
+        def _pnl_for(side_, entry, px):
+            return (px - entry) if side_ == "long" else (entry - px)
+
+        # no open position: open long OR short (if allowed)
+        if pos is None:
+            if signal == 1:
+                st.session_state.position = {"side": "long", "entry_price": float(price), "entry_time": timestamp}
+                logging.getLogger("LiveTradingLogger").info(f"Open LONG @ {price} on {timestamp}")
+            elif signal == -1 and st.session_state.allow_shorts:
+                st.session_state.position = {"side": "short", "entry_price": float(price), "entry_time": timestamp}
+                logging.getLogger("LiveTradingLogger").info(f"Open SHORT @ {price} on {timestamp}")
+            return
+
+        # have a position: handle closes
+        if signal == 1 and side == "short":
+            pnl = _pnl_for("short", float(pos["entry_price"]), float(price))
             st.session_state.trades.append({
-                "entry_price": float(pos["entry_price"]),
-                "exit_price": float(price),
-                "entry_time": pos["entry_time"],
-                "exit_time": timestamp,
-                "pnl": float(pnl),
+                "side": "short", "entry_price": float(pos["entry_price"]), "exit_price": float(price),
+                "entry_time": pos["entry_time"], "exit_time": timestamp, "pnl": float(pnl),
             })
             st.session_state.position = None
-            lg.info(f"Close LONG @ {price} on {timestamp} | PnL {pnl:.2f}")
+            logging.getLogger("LiveTradingLogger").info(f"Close SHORT @ {price} on {timestamp} | PnL {pnl:.2f}")
+        elif signal == -1 and side == "long":
+            pnl = _pnl_for("long", float(pos["entry_price"]), float(price))
+            st.session_state.trades.append({
+                "side": "long", "entry_price": float(pos["entry_price"]), "exit_price": float(price),
+                "entry_time": pos["entry_time"], "exit_time": timestamp, "pnl": float(pnl),
+            })
+            st.session_state.position = None
+            logging.getLogger("LiveTradingLogger").info(f"Close LONG @ {price} on {timestamp} | PnL {pnl:.2f}")
+
+        # mark-to-market equity curve
         total = sum(t['pnl'] for t in st.session_state.trades)
         if st.session_state.position is not None:
-            total += (float(price) - float(st.session_state.position["entry_price"]))
+            total += _pnl_for(st.session_state.position["side"], float(st.session_state.position["entry_price"]), float(price))
         st.session_state.equity_curve.append({"timestamp": timestamp, "total_pnl": float(total)})
 
     # ================= Signature-agnostic callback (NO st.*) =================
@@ -1045,6 +1081,7 @@ with tab2:
         if drained:
             st.session_state.last_ticks.append(_to_jsonable(drained[-1]))
             st.session_state.last_ticks = st.session_state.last_ticks[-10:]
+
             rows = []
             for t in (drained if isinstance(drained, list) else [drained]):
                 batch = t if isinstance(t, list) else [t]
@@ -1086,48 +1123,73 @@ with tab2:
             df = calculate_indicators_live(st.session_state.live_data.copy())
             st.session_state.live_data = df
 
+            # ===== Decision layer (two-sided) =====
             if st.session_state.model is not None and not df.empty:
                 pred, conf = predict_signal(st.session_state.model, df)
                 sig = _norm_signal(pred)
 
                 def adx_gate_ok(dff):
                     if "ADX14" not in dff.columns or st.session_state.adx_target_mult <= 0: return True
-                    adx_series = pd.to_numeric(dff["ADX14"], errors="coerce").dropna()
-                    if len(adx_series) < 20: return True
-                    cur = float(adx_series.iloc[-1]); base = float(adx_series.tail(200).median())
-                    return cur >= st.session_state.adx_target_mult * base
+                    s = pd.to_numeric(dff["ADX14"], errors="coerce").dropna()
+                    if len(s) < 20: return True
+                    return float(s.iloc[-1]) >= st.session_state.adx_target_mult * float(s.tail(200).median())
 
-                def time_limit_exit(now_ts):
+                def time_limit_exit(now_ts_):
                     tl = int(st.session_state.time_limit or 0)
                     if tl <= 0 or st.session_state.position is None: return False
-                    held = (now_ts - pd.to_datetime(st.session_state.position["entry_time"])).total_seconds() / 60
+                    held = (now_ts_ - pd.to_datetime(st.session_state.position["entry_time"])).total_seconds() / 60
                     return held >= tl
 
                 now_ts = pd.to_datetime(df["timestamp"].iloc[-1])
                 last_px = float(pd.to_numeric(df["last_traded_price"].iloc[-1], errors="coerce"))
+                pos = st.session_state.position
+                pos_open = pos is not None
+                pos_side = pos["side"] if pos_open else None
 
                 final_signal, reason = 0, "none"
+
+                # 1) time limit exits ANY side
                 if time_limit_exit(now_ts):
-                    final_signal = -1 if st.session_state.position is not None else 0; reason = "time_limit"
+                    final_signal = 1 if (pos_open and pos_side == "short") else (-1 if pos_open else 0)
+                    reason = "time_limit"
+
+                # 2) model signal (symmetric)
                 elif sig != 0 and conf is not None and conf >= float(st.session_state.conf_threshold) and adx_gate_ok(df):
-                    if sig != st.session_state.last_action_signal:
-                        final_signal = sig; reason = "model_conf_ok"
+                    if sig == 1:
+                        if not pos_open: final_signal, reason = 1, "model_open_long"
+                        elif pos_side == "short": final_signal, reason = 1, "model_close_short"
+                    elif sig == -1:
+                        if not pos_open and st.session_state.allow_shorts:
+                            final_signal, reason = -1, "model_open_short"
+                        elif pos_side == "long":
+                            final_signal, reason = -1, "model_close_long"
+
+                # 3) EMA fallback (symmetric)
                 elif {"ema_20","ema_50"}.issubset(df.columns):
                     e20, e50 = df["ema_20"].iloc[-1], df["ema_50"].iloc[-1]
-                    pos_open = st.session_state.position is not None
                     if pd.notna(e20) and pd.notna(e50):
-                        if e20 > e50 and not pos_open: final_signal = 1; reason = "fallback_ema"
-                        elif e20 < e50 and pos_open:  final_signal = -1; reason = "fallback_ema"
+                        if e20 > e50:
+                            if pos_open and pos_side == "short":
+                                final_signal, reason = 1, "fallback_close_short"
+                            elif not pos_open:
+                                final_signal, reason = 1, "fallback_open_long"
+                        elif e20 < e50:
+                            if pos_open and pos_side == "long":
+                                final_signal, reason = -1, "fallback_close_long"
+                            elif not pos_open and st.session_state.allow_shorts:
+                                final_signal, reason = -1, "fallback_open_short"
 
+                # Execute trade
                 if final_signal != 0 and st.session_state.auto_trade:
-                    update_trades(final_signal, last_px, now_ts); st.session_state.last_action_signal = final_signal
+                    update_trades(final_signal, last_px, now_ts)
+                    st.session_state.last_action_signal = final_signal
 
                 st.session_state.last_decision = {"ts": now_ts, "signal": final_signal, "reason": reason, "conf": conf}
-                dh = st.session_state.decision_history
-                dh.append({"timestamp": now_ts, "price": last_px,
-                           "model_pred_raw": None if pred is None else str(pred),
-                           "model_conf": conf, "final_signal": final_signal, "reason": reason})
-                st.session_state.decision_history = dh[-200:]
+                st.session_state.decision_history = (st.session_state.decision_history + [{
+                    "timestamp": now_ts, "price": last_px,
+                    "model_pred_raw": None if pred is None else str(pred),
+                    "model_conf": conf, "final_signal": final_signal, "reason": reason,
+                }])[-200:]
 
         return processed
 
@@ -1142,9 +1204,10 @@ with tab2:
         session_token = st.text_input("Session Token", type="password")
         uploaded_model_file = st.file_uploader("Upload ML Model (.pkl)", type=["pkl"])
 
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         with c1: connect_pressed = st.button("🚀 Connect & Subscribe")
-        with c2: st.toggle("🔁 Auto-update charts (continuous refresh)", key="run_live", value=st.session_state.get("run_live", False))
+        with c2: st.toggle("🔁 Auto-update charts", key="run_live", value=st.session_state.get("run_live", False))
+        with c3: st.checkbox("Allow short selling", key="allow_shorts", value=st.session_state.get("allow_shorts", True))
         st.caption(f"tickbus id: **{tickbus.BUS_ID}**  |  heartbeat: **{tickbus.heartbeat()}**")
 
     # ================= Grid search & seeding (optional) =================
@@ -1270,7 +1333,7 @@ with tab2:
         buy_x, buy_y, sell_x, sell_y = [], [], [], []
         for t in trades or []:
             et = pd.to_datetime(t["entry_time"], utc=True, errors="coerce")
-            xt = pd.to_datetime(t["exit_time"],  utc=True, errors="coerce")
+            xt = pd.to_datetime(t.get("exit_time"),  utc=True, errors="coerce")
             if pd.notna(et):
                 et_bar = bars.index.asof(et)
                 if pd.notna(et_bar): buy_x.append(et_bar); buy_y.append(bars.loc[et_bar, "open"])
@@ -1283,9 +1346,9 @@ with tab2:
                 et_bar = bars.index.asof(et)
                 if pd.notna(et_bar): buy_x.append(et_bar); buy_y.append(bars.loc[et_bar, "open"])
         if buy_x:
-            fig.add_trace(go.Scatter(x=buy_x, y=buy_y, mode="markers", name="BUY", marker=dict(symbol="triangle-up", size=12)))
+            fig.add_trace(go.Scatter(x=buy_x, y=buy_y, mode="markers", name="BUY/COVER", marker=dict(symbol="triangle-up", size=12)))
         if sell_x:
-            fig.add_trace(go.Scatter(x=sell_x, y=sell_y, mode="markers", name="SELL", marker=dict(symbol="triangle-down", size=12)))
+            fig.add_trace(go.Scatter(x=sell_x, y=sell_y, mode="markers", name="SELL/SHORT", marker=dict(symbol="triangle-down", size=12)))
         fig.update_layout(height=520, margin=dict(l=10,r=10,t=40,b=10),
                           legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
         fig.update_xaxes(showgrid=False); fig.update_yaxes(showgrid=True)
@@ -1310,7 +1373,12 @@ with tab2:
             df = pd.concat([pd.DataFrame([pad]), df], ignore_index=True)
 
         latest_price = float(df["last_traded_price"].iloc[-1])
-        open_pnl = (latest_price - float(st.session_state.position["entry_price"])) if st.session_state.position else 0.0
+        # mark open pnl
+        open_pnl = 0.0
+        if st.session_state.position is not None:
+            side = st.session_state.position["side"]
+            entry = float(st.session_state.position["entry_price"])
+            open_pnl = (latest_price - entry) if side == "long" else (entry - latest_price)
         total_pnl = float(sum(t['pnl'] for t in st.session_state.trades))
 
         with ph_metrics.container():
@@ -1325,7 +1393,9 @@ with tab2:
             st.plotly_chart(make_candles_with_signals(df, st.session_state.trades, st.session_state.position), use_container_width=True)
 
         with st.expander("🛠 Live Debug", expanded=True):
-            st.write(f"Queue size: **{tickbus.TICK_QUEUE.qsize()}**")
+            from queue import Queue
+            qsize = tickbus.TICK_QUEUE.qsize() if isinstance(getattr(tickbus, "TICK_QUEUE", None), Queue) else 0
+            st.write(f"Queue size: **{qsize}**")
             st.write(f"Heartbeat: **{tickbus.heartbeat()}**")
             st.write(f"Live rows: **{len(st.session_state.live_data)}**")
             st.write(f"tickbus id: **{tickbus.BUS_ID}**")
@@ -1370,8 +1440,11 @@ with tab2:
                 st.download_button("⬇️ Download Raw Ticks CSV", data=raw_df[["timestamp","raw"]].to_csv(index=False), file_name="live_raw_ticks.csv", mime="text/csv")
 
         with ph_pos.container():
-            st.info(f"🟢 Open Position: Entry ₹{st.session_state.position['entry_price']:.2f} at {st.session_state.position['entry_time']}"
-                    if st.session_state.position else "⚪ No open position")
+            pos = st.session_state.position
+            st.info(
+                f"🟢 Open {pos['side'].upper()} | Entry ₹{pos['entry_price']:.2f} at {pos['entry_time']}"
+                if pos else "⚪ No open position"
+            )
 
         with ph_trades.container():
             if st.session_state.trades:
