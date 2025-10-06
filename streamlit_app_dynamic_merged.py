@@ -761,6 +761,8 @@ with tab1:
             else:
                 st.info("No intraday trades data available to display outlier trades.")
 
+with tab2:
+
     st.title("📊 Live Trading Dashboard")
 
     # ================= Constants & logging =================
