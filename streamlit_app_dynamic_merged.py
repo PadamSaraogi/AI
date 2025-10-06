@@ -766,8 +766,8 @@ with tab2:
 
 # ================= Hard-coded Breeze credentials (fill these in code) =================
 # ⚠️ Put your real keys here (do NOT commit them to git)
-    BREEZE_API_KEY    = "=4c730660p24@d03%65343MG909o217L"
-    BREEZE_API_SECRET = "416D2gJdy064P7F7)s5e590J8I1692~7"
+BREEZE_API_KEY    = "=4c730660p24@d03%65343MG909o217L"
+BREEZE_API_SECRET = "416D2gJdy064P7F7)s5e590J8I1692~7"
 
 def _keys_ok() -> bool:
     bad = (
@@ -795,8 +795,7 @@ if not lg.handlers:
 
 # Ensure BUS_ID even if an older tickbus is imported by accident
 if not hasattr(tickbus, "BUS_ID"):
-    import os, uuid as _uuid
-    tickbus.BUS_ID = os.environ.get("TICKBUS_ID", str(_uuid.uuid4())[:8])
+    tickbus.BUS_ID = os.environ.get("TICKBUS_ID", str(uuid.uuid4())[:8])
 
 lg.info(f"[boot bus {tickbus.BUS_ID}] tab loaded")
 
@@ -832,6 +831,8 @@ defaults = {
     "exchange_code": "",
     "stock_code": "",
     "stock_token": "",
+    # Option B minute-gate
+    "_last_decision_min": None,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -938,11 +939,11 @@ def predict_signal(model, df: pd.DataFrame):
     latest = df.dropna(subset=[c for c in req if c != "volume_spike_ratio"])
     if latest.empty: return None, None
     X = latest.iloc[-1:][req]
-    pred = model.predict(X)[0]
+    pred = X.shape[0] and getattr(st.session_state.model, "predict", lambda _x: [0])(X)[0]
     conf = None
-    if hasattr(model, "predict_proba"):
-        proba = model.predict_proba(X)[0]
-        classes_ = getattr(model, "classes_", None)
+    if hasattr(st.session_state.model, "predict_proba"):
+        proba = st.session_state.model.predict_proba(X)[0]
+        classes_ = getattr(st.session_state.model, "classes_", None)
         buy_idx = None
         if classes_ is not None:
             try:
@@ -985,7 +986,6 @@ def update_trades(signal, price, timestamp):
         elif signal == -1 and st.session_state.allow_shorts:
             st.session_state.position = {"side": "short", "entry_price": float(price), "entry_time": timestamp}
             logging.getLogger("LiveTradingLogger").info(f"Open SHORT @ {price} on {timestamp}")
-        # mark-to-market after any open attempt
         total = sum(t['pnl'] for t in st.session_state.trades)
         if st.session_state.position is not None:
             total += _pnl_for(st.session_state.position["side"], float(st.session_state.position["entry_price"]), float(price))
@@ -1009,7 +1009,6 @@ def update_trades(signal, price, timestamp):
         st.session_state.position = None
         logging.getLogger("LiveTradingLogger").info(f"Close LONG @ {price} on {timestamp} | PnL {pnl:.2f}")
 
-    # mark-to-market equity curve
     total = sum(t['pnl'] for t in st.session_state.trades)
     if st.session_state.position is not None:
         total += _pnl_for(st.session_state.position["side"], float(st.session_state.position["entry_price"]), float(price))
@@ -1095,7 +1094,7 @@ def process_bar_queue():
     df_new = pd.DataFrame(rows)
     st.session_state.live_data = (
         pd.concat([st.session_state.live_data, df_new], ignore_index=True)
-        .drop_duplicates(subset=["timestamp"], keep="last") 
+        .drop_duplicates(subset=["timestamp"], keep="last")   # avoid duplicate labels
         .tail(MAX_WINDOW_SIZE)
         .reset_index(drop=True)
     )
@@ -1105,73 +1104,92 @@ def process_bar_queue():
         df = calculate_indicators_live(st.session_state.live_data.copy())
         st.session_state.live_data = df
 
-        # ===== Decision layer (two-sided; one decision per bar) =====
+        # ===== Decision layer (Option B: decide once per minute) =====
         if st.session_state.model is not None and not df.empty:
-            pred, conf = predict_signal(st.session_state.model, df)
-            sig = _norm_signal(pred)
+            last_ts = pd.to_datetime(df["timestamp"].iloc[-1])
+            curr_min = last_ts.floor("1min")
 
-            def adx_gate_ok(dff):
-                if "ADX14" not in dff.columns or st.session_state.adx_target_mult <= 0: return True
-                s = pd.to_numeric(dff["ADX14"], errors="coerce").dropna()
-                if len(s) < 20: return True
-                return float(s.iloc[-1]) >= st.session_state.adx_target_mult * float(s.tail(200).median())
+            # minute gate: only decide if we haven't yet in this minute
+            if st.session_state.get("_last_decision_min") == curr_min:
+                st.session_state.last_decision = {
+                    "ts": last_ts, "signal": 0, "reason": "skip_same_minute", "conf": None
+                }
+                last_px = float(pd.to_numeric(df["last_traded_price"].iloc[-1], errors="coerce"))
+                st.session_state.decision_history = (st.session_state.decision_history + [{
+                    "timestamp": last_ts, "price": last_px,
+                    "model_pred_raw": None, "model_conf": None,
+                    "final_signal": 0, "reason": "skip_same_minute",
+                }])[-200:]
+                # do not count as additional processed bars here; we just skip decision
+            else:
+                # mark: we are making this minute's decision
+                st.session_state["_last_decision_min"] = curr_min
 
-            def time_limit_exit(now_ts_):
-                tl = int(st.session_state.time_limit or 0)
-                if tl <= 0 or st.session_state.position is None: return False
-                held = (now_ts_ - pd.to_datetime(st.session_state.position["entry_time"])).total_seconds() / 60
-                return held >= tl
+                pred, conf = predict_signal(st.session_state.model, df)
+                sig = _norm_signal(pred)
 
-            now_ts = pd.to_datetime(df["timestamp"].iloc[-1])
-            last_px = float(pd.to_numeric(df["last_traded_price"].iloc[-1], errors="coerce"))
-            pos = st.session_state.position
-            pos_open = pos is not None
-            pos_side = pos["side"] if pos_open else None
+                def adx_gate_ok(dff):
+                    if "ADX14" not in dff.columns or st.session_state.adx_target_mult <= 0: return True
+                    s = pd.to_numeric(dff["ADX14"], errors="coerce").dropna()
+                    if len(s) < 20: return True
+                    return float(s.iloc[-1]) >= st.session_state.adx_target_mult * float(s.tail(200).median())
 
-            final_signal, reason = 0, "none"
+                def time_limit_exit(now_ts_):
+                    tl = int(st.session_state.time_limit or 0)
+                    if tl <= 0 or st.session_state.position is None: return False
+                    held = (now_ts_ - pd.to_datetime(st.session_state.position["entry_time"])).total_seconds() / 60
+                    return held >= tl
 
-            # 1) time limit exits ANY side
-            if time_limit_exit(now_ts):
-                final_signal = 1 if (pos_open and pos_side == "short") else (-1 if pos_open else 0)
-                reason = "time_limit"
+                now_ts = last_ts
+                last_px = float(pd.to_numeric(df["last_traded_price"].iloc[-1], errors="coerce"))
+                pos = st.session_state.position
+                pos_open = pos is not None
+                pos_side = pos["side"] if pos_open else None
 
-            # 2) model signal (symmetric)
-            elif sig != 0 and conf is not None and conf >= float(st.session_state.conf_threshold) and adx_gate_ok(df):
-                if sig == 1:
-                    if not pos_open: final_signal, reason = 1, "model_open_long"
-                    elif pos_side == "short": final_signal, reason = 1, "model_close_short"
-                elif sig == -1:
-                    if not pos_open and st.session_state.allow_shorts:
-                        final_signal, reason = -1, "model_open_short"
-                    elif pos_side == "long":
-                        final_signal, reason = -1, "model_close_long"
+                final_signal, reason = 0, "none"
 
-            # 3) EMA fallback (symmetric)
-            elif {"ema_20","ema_50"}.issubset(df.columns):
-                e20, e50 = df["ema_20"].iloc[-1], df["ema_50"].iloc[-1]
-                if pd.notna(e20) and pd.notna(e50):
-                    if e20 > e50:
-                        if pos_open and pos_side == "short":
-                            final_signal, reason = 1, "fallback_close_short"
-                        elif not pos_open:
-                            final_signal, reason = 1, "fallback_open_long"
-                    elif e20 < e50:
-                        if pos_open and pos_side == "long":
-                            final_signal, reason = -1, "fallback_close_long"
-                        elif not pos_open and st.session_state.allow_shorts:
-                            final_signal, reason = -1, "fallback_open_short"
+                # 1) time limit exits ANY side
+                if time_limit_exit(now_ts):
+                    final_signal = 1 if (pos_open and pos_side == "short") else (-1 if pos_open else 0)
+                    reason = "time_limit"
 
-            # Execute trade
-            if final_signal != 0 and st.session_state.auto_trade:
-                update_trades(final_signal, last_px, now_ts)
-                st.session_state.last_action_signal = final_signal
+                # 2) model signal (symmetric)
+                elif sig != 0 and conf is not None and conf >= float(st.session_state.conf_threshold) and adx_gate_ok(df):
+                    if sig == 1:
+                        if not pos_open: final_signal, reason = 1, "model_open_long"
+                        elif pos_side == "short": final_signal, reason = 1, "model_close_short"
+                    elif sig == -1:
+                        if not pos_open and st.session_state.allow_shorts:
+                            final_signal, reason = -1, "model_open_short"
+                        elif pos_side == "long":
+                            final_signal, reason = -1, "model_close_long"
 
-            st.session_state.last_decision = {"ts": now_ts, "signal": final_signal, "reason": reason, "conf": conf}
-            st.session_state.decision_history = (st.session_state.decision_history + [{
-                "timestamp": now_ts, "price": last_px,
-                "model_pred_raw": None if pred is None else str(pred),
-                "model_conf": conf, "final_signal": final_signal, "reason": reason,
-            }])[-200:]
+                # 3) EMA fallback (symmetric)
+                elif {"ema_20","ema_50"}.issubset(df.columns):
+                    e20, e50 = df["ema_20"].iloc[-1], df["ema_50"].iloc[-1]
+                    if pd.notna(e20) and pd.notna(e50):
+                        if e20 > e50:
+                            if pos_open and pos_side == "short":
+                                final_signal, reason = 1, "fallback_close_short"
+                            elif not pos_open:
+                                final_signal, reason = 1, "fallback_open_long"
+                        elif e20 < e50:
+                            if pos_open and pos_side == "long":
+                                final_signal, reason = -1, "fallback_close_long"
+                            elif not pos_open and st.session_state.allow_shorts:
+                                final_signal, reason = -1, "fallback_open_short"
+
+                # Execute trade (once per minute max)
+                if final_signal != 0 and st.session_state.auto_trade:
+                    update_trades(final_signal, last_px, now_ts)
+                    st.session_state.last_action_signal = final_signal
+
+                st.session_state.last_decision = {"ts": now_ts, "signal": final_signal, "reason": reason, "conf": conf}
+                st.session_state.decision_history = (st.session_state.decision_history + [{
+                    "timestamp": now_ts, "price": last_px,
+                    "model_pred_raw": None if pred is None else str(pred),
+                    "model_conf": conf, "final_signal": final_signal, "reason": reason,
+                }])[-200:]
 
     # keep a compact preview of last few bars
     st.session_state.last_bars = (st.session_state.last_bars + _to_jsonable(bars)[-5:])[-10:]
@@ -1199,7 +1217,6 @@ with st.expander("🔑 Connection Settings", expanded=True):
     st.caption(f"tickbus id: **{tickbus.BUS_ID}**  |  heartbeat: **{hb}**")
 
 # ================= Grid search & seeding (optional) =================
-
 def _normalize_grid_df(df: pd.DataFrame) -> pd.DataFrame:
     # standardize column names
     df = df.rename(columns={c: c.strip().replace(" ", "_").replace("-", "_") for c in df.columns})
@@ -1354,8 +1371,9 @@ with st.expander("🧪 Grid Search & Seeding (optional)", expanded=True):
         except Exception as e:
             st.error(f"Seed parse error: {e}")
 
-
 # ================= Connect (UI thread only) =================
+if st.session_state.get("breeze") is None:
+    connect_pressed = 'connect_pressed' in locals() and connect_pressed
 if connect_pressed and st.session_state.get("breeze") is None:
     if BreezeConnect is None:
         st.error("breeze-connect is not installed. `pip install breeze-connect`")
@@ -1452,13 +1470,8 @@ def make_candles_with_signals(df_bars: pd.DataFrame, trades: list, current_pos: 
 
     # --- helper to dedup + forward-fill onto minute grid ---
     def _dedup_and_pad(series, target_index):
-        s = series.copy()
-        s = s.sort_index()
-        if not s.index.is_monotonic_increasing:
-            s = s.sort_index()
-        # drop duplicate timestamps, keep last
+        s = series.copy().sort_index()
         s = s[~s.index.duplicated(keep="last")]
-        # align to target (minute) index with pad
         return s.reindex(target_index, method="pad")
 
     overlays = []
@@ -1503,7 +1516,6 @@ def make_candles_with_signals(df_bars: pd.DataFrame, trades: list, current_pos: 
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
     fig.update_xaxes(showgrid=False); fig.update_yaxes(showgrid=True)
     return fig
-
 
 # ================= Render once =================
 def render_dashboard_once():
@@ -1554,6 +1566,7 @@ def render_dashboard_once():
         st.write(f"Heartbeat: **{hb}**")
         st.write(f"Live rows: **{len(st.session_state.live_data)}**")
         st.write(f"tickbus id: **{tickbus.BUS_ID}**")
+        st.write(f"Decision minute gate: **{st.session_state.get('_last_decision_min')}**")
         if not st.session_state.live_data.empty:
             tail = st.session_state.live_data.tail(5).copy()
             tail["timestamp"] = pd.to_datetime(tail["timestamp"], errors="coerce")
