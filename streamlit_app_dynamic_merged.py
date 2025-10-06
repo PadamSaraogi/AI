@@ -763,7 +763,23 @@ with tab1:
 
 with tab2:
 
-    st.title("📊 Live Trading Dashboard")
+
+# ================= Hard-coded Breeze credentials (fill these in code) =================
+# ⚠️ Put your real keys here (do NOT commit them to git)
+BREEZE_API_KEY    = "=4c730660p24@d03%65343MG909o217L"
+BREEZE_API_SECRET = "416D2gJdy064P7F7)s5e590J8I1692~7"
+
+def _keys_ok() -> bool:
+    bad = (
+        not BREEZE_API_KEY or BREEZE_API_KEY.startswith("PUT_") or
+        not BREEZE_API_SECRET or BREEZE_API_SECRET.startswith("PUT_")
+    )
+    if bad:
+        st.error("Set BREEZE_API_KEY and BREEZE_API_SECRET in the code at the top of this block.")
+    return not bad
+
+# ================= UI Title =================
+st.title("📊 Live Trading Dashboard")
 
 # ================= Constants & logging =================
 MAX_WINDOW_SIZE  = 15000
@@ -786,14 +802,14 @@ lg.info(f"[boot bus {tickbus.BUS_ID}] tab loaded")
 
 # ✅ start 1-Hz (configurable) bar aggregator once
 try:
-    tickbus.enable_debug(False)           # set True if you want stdout bar logs
-    tickbus.start_bar_aggregator(cadence_sec=1)   # 1-second bars
+    tickbus.enable_debug(False)                 # set True if you want stdout bar logs
+    tickbus.start_bar_aggregator(cadence_sec=1) # 1-second bars
 except Exception as _e:
     lg.info(f"tickbus aggregator start: {_e}")
 
 # ================= Session defaults =================
 defaults = {
-    "live_data": pd.DataFrame(),   # will hold one row per emitted bar
+    "live_data": pd.DataFrame(),   # 1 row per emitted 1s bar
     "position": None,              # {"side": "long"/"short", "entry_price": float, "entry_time": ts}
     "trades": [],                  # list of closed trades dicts
     "equity_curve": [],            # [{timestamp, total_pnl}]
@@ -812,6 +828,10 @@ defaults = {
     "last_decision": None,
     "decision_history": [],
     "allow_shorts": True,          # enable short selling
+    # connection fields
+    "exchange_code": "",
+    "stock_code": "",
+    "stock_token": "",
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -852,7 +872,6 @@ def _to_jsonable(obj):
     return str(obj)
 
 # ================= Indicators / features =================
-# (unchanged logic; operates on df of bars as well)
 def calculate_indicators_live(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty: return df
     d = df.copy().sort_values("timestamp")
@@ -880,7 +899,7 @@ def calculate_indicators_live(df: pd.DataFrame) -> pd.DataFrame:
     v = pd.to_numeric(d["volume"], errors="coerce")
     d["volume_spike_ratio"] = (v / v.rolling(200, min_periods=20).mean()).astype("float64")
 
-    # Optional: 1-minute resample features (kept from your previous logic)
+    # Optional: 1-minute resample features
     try:
         bars_1m = (
             d.set_index("timestamp")
@@ -996,11 +1015,10 @@ def update_trades(signal, price, timestamp):
         total += _pnl_for(st.session_state.position["side"], float(st.session_state.position["entry_price"]), float(price))
     st.session_state.equity_curve.append({"timestamp": timestamp, "total_pnl": float(total)})
 
-# ================= Signature-agnostic callback (feeds raw ticks to aggregator) =================
+# ================= Broker tick callback → aggregator =================
 def on_ticks(*args, **kwargs):
     """Broker websocket callback → push raw ticks into tickbus aggregator."""
     ticks = kwargs.get("ticks") if "ticks" in kwargs else (args[0] if args else (kwargs if kwargs else None))
-    # normalize into a list
     batch = ticks if isinstance(ticks, list) else [ticks]
     fed = 0
     for item in batch:
@@ -1032,13 +1050,12 @@ def on_ticks(*args, **kwargs):
         except Exception:
             sz = 1.0
 
-        # push into aggregator
         tickbus.put_raw_tick({"ts": ts, "price": px, "size": sz})
         fed += 1
 
     logging.getLogger("LiveTradingLogger").info(f"[bus {tickbus.BUS_ID}] raw → aggregator ({fed} items)")
 
-# If already connected in a previous run, rebind callback & (light) resubscribe
+# Rebind on rerun if already connected
 if st.session_state.get("breeze") is not None:
     try:
         st.session_state.breeze.on_ticks = on_ticks
@@ -1161,62 +1178,71 @@ def process_bar_queue():
 
 # ================= Connection settings =================
 with st.expander("🔑 Connection Settings", expanded=True):
-    st.session_state["exchange_code"] = st.text_input("Exchange Code (e.g., NSE)", value=st.session_state.get("exchange_code", ""))
-    st.session_state["stock_code"]    = st.text_input("Stock Code (e.g., NIFTY 50)", value=st.session_state.get("stock_code", ""))
-    st.session_state["stock_token"]   = st.text_input("Stock Token (optional)", value=st.session_state.get("stock_token", ""))
+    st.session_state["exchange_code"] = st.text_input("Exchange Code (e.g., NSE)", value=st.session_state["exchange_code"])
+    st.session_state["stock_code"]    = st.text_input("Stock Code (e.g., NIFTY 50)", value=st.session_state["stock_code"])
+    st.session_state["stock_token"]   = st.text_input("Stock Token (optional)", value=st.session_state["stock_token"])
 
-    # keep your real keys elsewhere; placeholders here
-    api_key = st.text_input("API Key", value="", type="password")
-    api_secret = st.text_input("API Secret", value="", type="password")
-    session_token = st.text_input("Session Token", type="password")
+    # API key & secret are hard-coded above; we only ask for Session Token here
+    session_token = st.text_input("Session Token", type="password", help="Paste your active Breeze session token")
     uploaded_model_file = st.file_uploader("Upload ML Model (.pkl)", type=["pkl"])
 
     c1, c2, c3 = st.columns(3)
-    with c1: connect_pressed = st.button("🚀 Connect & Subscribe")
+    with c1: connect_pressed = st.button("🚀 Connect & Subscribe", disabled=(BreezeConnect is None))
     with c2: st.toggle("🔁 Auto-update charts", key="run_live", value=st.session_state.get("run_live", False))
     with c3: st.checkbox("Allow short selling", key="allow_shorts", value=st.session_state.get("allow_shorts", True))
-    # heartbeat accessor updated
+    # heartbeat accessor
     try:
         hb = tickbus.heartbeat_value()
     except Exception:
         hb = getattr(tickbus, "heartbeat", lambda: 0)()
     st.caption(f"tickbus id: **{tickbus.BUS_ID}**  |  heartbeat: **{hb}**")
 
-# ================= Grid search & seeding (optional) =================
-# (unchanged – leave your existing block here)
-
 # ================= Connect (UI thread only) =================
 if connect_pressed and st.session_state.get("breeze") is None:
-    exchange_code = st.session_state["exchange_code"]
-    stock_code    = st.session_state["stock_code"]
-    stock_token   = st.session_state["stock_token"]
-    if not (api_key and api_secret and session_token and exchange_code):
-        st.error("⚠️ Provide API key, secret, session token, and exchange code.")
-    elif uploaded_model_file is None:
-        st.error("⚠️ Upload your ML model file first (.pkl).")
+    if BreezeConnect is None:
+        st.error("breeze-connect is not installed. `pip install breeze-connect`")
+    elif not _keys_ok():
+        pass  # error already shown
     else:
-        try:
-            breeze = BreezeConnect(api_key=api_key)
-            breeze.on_ticks = on_ticks
-            breeze.generate_session(api_secret=api_secret, session_token=session_token)
-            breeze.ws_connect()
-            if stock_token.strip():
-                breeze.subscribe_feeds(stock_token=stock_token.strip(),
-                                       get_market_depth=True, get_exchange_quotes=True)
-            elif stock_code.strip():
-                breeze.subscribe_feeds(exchange_code=exchange_code, stock_code=stock_code.strip(),
-                                       product_type="cash", get_market_depth=True, get_exchange_quotes=True)
-            else:
-                raise ValueError("No instrument provided")
-            st.session_state.breeze = breeze
-            # load model
-            model_bytes = uploaded_model_file.read()
-            st.session_state.model = joblib.load(io.BytesIO(model_bytes))
-            st.success("✅ Connected, subscribed & model loaded.")
-            st.info(f"Connected with tickbus id **{tickbus.BUS_ID}**")
-        except Exception as e:
-            st.error(f"Connection error: {e}")
-            lg.error(f"Connection error: {e}")
+        exchange_code = st.session_state["exchange_code"]
+        stock_code    = st.session_state["stock_code"]
+        stock_token   = st.session_state["stock_token"]
+
+        if not (session_token and exchange_code):
+            st.error("⚠️ Provide session token and exchange code.")
+        elif uploaded_model_file is None:
+            st.error("⚠️ Upload your ML model file first (.pkl).")
+        else:
+            try:
+                breeze = BreezeConnect(api_key=BREEZE_API_KEY)
+                breeze.on_ticks = on_ticks
+                breeze.generate_session(api_secret=BREEZE_API_SECRET, session_token=session_token)
+                breeze.ws_connect()
+
+                if stock_token.strip():
+                    breeze.subscribe_feeds(stock_token=stock_token.strip(),
+                                           get_market_depth=True, get_exchange_quotes=True)
+                elif stock_code.strip():
+                    breeze.subscribe_feeds(exchange_code=exchange_code, stock_code=stock_code.strip(),
+                                           product_type="cash", get_market_depth=True, get_exchange_quotes=True)
+                else:
+                    raise ValueError("No instrument provided")
+
+                st.session_state.breeze = breeze
+
+                # load model
+                model_bytes = uploaded_model_file.read()
+                if joblib is None:
+                    st.warning("joblib not installed; cannot load model. `pip install joblib`")
+                else:
+                    st.session_state.model = joblib.load(io.BytesIO(model_bytes))
+
+                st.success("✅ Connected, subscribed & model loaded.")
+                st.info(f"Connected with tickbus id **{tickbus.BUS_ID}**")
+
+            except Exception as e:
+                st.error(f"Connection error: {e}")
+                lg.error(f"Connection error: {e}")
 
 # ================= Debug tools =================
 with st.expander("🔧 Debug tools"):
@@ -1328,7 +1354,7 @@ def render_dashboard_once():
         open_pnl = (latest_price - entry) if side == "long" else (entry - latest_price)
     total_pnl = float(sum(t['pnl'] for t in st.session_state.trades))
 
-    with ph_metrics.container():
+    with st.container():
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("📈 Last Price", f"₹{latest_price:.2f}")
         c2.metric("💰 Open PnL", f"{open_pnl:.2f}")
@@ -1341,7 +1367,8 @@ def render_dashboard_once():
 
     with ph_candles.container():
         st.subheader("📊 Candles + Signals (IST)")
-        st.plotly_chart(make_candles_with_signals(df, st.session_state.trades, st.session_state.position), use_container_width=True)
+        st.plotly_chart(make_candles_with_signals(df, st.session_state.trades, st.session_state.position),
+                        use_container_width=True)
 
     with st.expander("🛠 Live Debug", expanded=True):
         st.write(f"Heartbeat: **{hb}**")
