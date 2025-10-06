@@ -1,183 +1,315 @@
-# --- Live Trading Tab ---------------------------------------------------------
+"""
+tickbus.py
+Event bus + bar aggregator for live ticks.
+
+- Thread-safe raw tick ingestion at any rate.
+- Deterministic bar aggregation at fixed cadence (default 1 second).
+- Emits OHLC, VWAP, Volume bars you can drain in your trading loop.
+- Diagnostics: BUS_ID + heartbeat counter.
+- Backward-compat shims for legacy calls: put(), drain(), heartbeat(), TICK_QUEUE, next_seq().
+
+Usage
+------
+import tickbus
+
+tickbus.start_bar_aggregator(cadence_sec=1)  # start once (1-second bars)
+
+# push raw ticks from your broker callback:
+tickbus.put_raw_tick({"ts": time.time(), "price": 123.45, "size": 1.0})
+
+# in your processing loop (UI or worker):
+bars = tickbus.drain_bars()
+for bar in bars:
+    # bar: {ts, end_ts, cadence, open, high, low, close, vwap, volume}
+    ...
+"""
+
+from __future__ import annotations
+import os
 import time
-import math
-import numpy as np
-import pandas as pd
-import streamlit as st
+import json
+import uuid
+import queue
+import threading
+from typing import Dict, Any, List, Optional
 
-import tickbus  # our bus + aggregator
+# ---------------------------
+# Diagnostics
+# ---------------------------
+BUS_ID = os.environ.get("TICKBUS_ID", str(uuid.uuid4())[:8])
 
-# --- tiny indicator helpers ---------------------------------------------------
-def ema(series: pd.Series, span: int) -> pd.Series:
-    return series.ewm(span=span, adjust=False, min_periods=span).mean()
+_HEARTBEAT = 0
+_HB_LOCK = threading.Lock()
 
-def crossover(series_fast: pd.Series, series_slow: pd.Series) -> pd.Series:
-    # +1 when fast crosses above slow, -1 when crosses below, 0 otherwise
-    prev_fast = series_fast.shift(1)
-    prev_slow = series_slow.shift(1)
-    up = (prev_fast <= prev_slow) & (series_fast > series_slow)
-    down = (prev_fast >= prev_slow) & (series_fast < series_slow)
-    sig = pd.Series(0, index=series_fast.index, dtype=int)
-    sig[up] = 1
-    sig[down] = -1
-    return sig
+def heartbeat_inc(n: int = 1) -> None:
+    global _HEARTBEAT
+    with _HB_LOCK:
+        _HEARTBEAT += n
 
-# --- trade engine (toy example: EMA crossover) -------------------------------
-def maybe_trade_on_bar(bar: dict, state: dict):
+def heartbeat_value() -> int:
+    with _HB_LOCK:
+        return _HEARTBEAT
+
+# ---------------------------
+# Queues
+# ---------------------------
+_RAW_TICKS: "queue.Queue[Dict[str, Any]]" = queue.Queue()
+_BAR_QUEUE: "queue.Queue[Dict[str, Any]]" = queue.Queue()
+
+# ---------------------------
+# Aggregator state
+# ---------------------------
+_BAR_LOCK = threading.Lock()
+_RUNNING = False
+_CADENCE = 1  # seconds
+
+# Current bar accumulators
+_curr_bucket: Optional[int] = None  # epoch seconds bucket start
+_o = _h = _l = _c = None
+_v_sum = 0.0
+_pv_sum = 0.0
+
+def _bucket_of(ts: float, cadence: int) -> int:
+    sec = int(ts)
+    return (sec // cadence) * cadence
+
+def put_raw_tick(tick: Dict[str, Any]) -> None:
     """
-    Called once per emitted bar (e.g., per second).
-    This is a toy strategy: EMA(5) vs EMA(20) on close.
+    Public: enqueue a raw tick and update aggregator.
+
+    tick:
+      ts:   float|int epoch seconds (optional; uses time.time() if missing)
+      price: float (required)
+      size:  float (optional; default 1.0)
     """
-    price = bar["close"]
-    ts = bar["end_ts"]  # bar end time
+    global _curr_bucket, _o, _h, _l, _c, _v_sum, _pv_sum
 
-    # Append to history
-    row = {
-        "ts": pd.to_datetime(ts, unit="s"),
-        "close": price,
-        "vwap": bar["vwap"],
-        "volume": bar["volume"],
-    }
-    state["df"] = pd.concat([state["df"], pd.DataFrame([row])], ignore_index=True)
-
-    df = state["df"]
-    # Indicators
-    df["ema_fast"] = ema(df["close"], span=state["ema_fast_span"])
-    df["ema_slow"] = ema(df["close"], span=state["ema_slow_span"])
-    df["x"] = crossover(df["ema_fast"], df["ema_slow"])
-
-    # Skip until we have both EMAs
-    if len(df) < max(state["ema_fast_span"], state["ema_slow_span"]) + 2:
+    if not isinstance(tick, dict) or "price" not in tick:
         return
 
-    signal = int(df.iloc[-1]["x"])  # +1/-1/0 on this bar
-    pos = state["position"]  # -1, 0, +1
-    qty = state["qty_per_trade"]
+    try:
+        ts = float(tick.get("ts", time.time()))
+    except Exception:
+        ts = time.time()
 
-    # simple execution simulator; replace with your broker call
-    def fill(order_side: str, qty: float, px: float):
-        # naive FIFO PnL for single-position logic
-        if order_side == "BUY":
-            state["cash"] -= px * qty
-            state["position"] += qty
+    # normalize price/size
+    px = tick["price"]
+    try:
+        px = float(str(px).replace(",", ""))
+    except Exception:
+        return
+
+    sz = tick.get("size", 1.0)
+    try:
+        sz = float(str(sz).replace(",", ""))
+    except Exception:
+        sz = 1.0
+
+    # Store raw tick (optional consumer: charts / debug)
+    _RAW_TICKS.put({"ts": ts, "price": px, "size": sz})
+
+    # Aggregate into cadence bucket
+    bucket = _bucket_of(ts, _CADENCE)
+
+    with _BAR_LOCK:
+        if _curr_bucket is None:
+            # initialize bar
+            _curr_bucket = bucket
+            _o = _h = _l = _c = px
+            _v_sum = sz
+            _pv_sum = px * sz
+        elif bucket == _curr_bucket:
+            # update current bar
+            _c = px
+            _h = px if (_h is None or px > _h) else _h
+            _l = px if (_l is None or px < _l) else _l
+            _v_sum += sz
+            _pv_sum += px * sz
         else:
-            state["cash"] += px * qty
-            state["position"] -= qty
-        state["trades"].append({"ts": row["ts"], "side": order_side, "qty": qty, "px": px})
+            # boundary crossed: emit previous, start new
+            _emit_current_bar_locked()
+            _curr_bucket = bucket
+            _o = _h = _l = _c = px
+            _v_sum = sz
+            _pv_sum = px * sz
 
-    # entry/exit logic (flip to signal direction; flat when 0)
-    if state["auto_trade"]:
-        if signal > 0 and pos <= 0:
-            # close short if any, then go long
-            if pos < 0:
-                fill("BUY", qty=abs(pos), px=price)
-            fill("BUY", qty=qty, px=price)
-        elif signal < 0 and pos >= 0:
-            # close long if any, then go short
-            if pos > 0:
-                fill("SELL", qty=pos, px=price)
-            fill("SELL", qty=qty, px=price)
-        elif signal == 0:
-            # optional: flatten on 0 signal (comment out if you prefer to keep position)
-            if pos > 0:
-                fill("SELL", qty=pos, px=price)
-            elif pos < 0:
-                fill("BUY", qty=abs(pos), px=price)
+    heartbeat_inc()
 
-    # mark-to-market
-    pos_val = state["position"] * price
-    state["equity"] = state["cash"] + pos_val
-    state["last_price"] = price
+def _emit_current_bar_locked() -> None:
+    """Emit the current bar. Must be called under _BAR_LOCK."""
+    global _curr_bucket, _o, _h, _l, _c, _v_sum, _pv_sum
+    if _curr_bucket is None or _c is None:
+        return
+    vwap = (_pv_sum / _v_sum) if _v_sum > 0 else _c
+    bar = {
+        "ts": float(_curr_bucket),   # start time of the bar
+        "end_ts": float(_curr_bucket + _CADENCE),
+        "cadence": _CADENCE,
+        "open": float(_o),
+        "high": float(_h),
+        "low": float(_l),
+        "close": float(_c),
+        "vwap": float(vwap),
+        "volume": float(_v_sum),
+    }
+    _BAR_QUEUE.put(bar)
 
-def render_live_trading_tab():
-    st.header("📡 Live Trading")
+def _bar_flusher_loop() -> None:
+    """
+    Background thread: on cadence boundary, flush bar even if no new ticks.
+    Emits a 'carry' bar for quiet intervals (volume may be zero).
+    """
+    global _curr_bucket, _o, _h, _l, _c, _v_sum, _pv_sum
+    while True:
+        time.sleep(0.05)  # fine-grained boundary detection
+        now = time.time()
+        with _BAR_LOCK:
+            if _curr_bucket is None:
+                continue
+            if now >= (_curr_bucket + _CADENCE):
+                _emit_current_bar_locked()
+                # advance to next bucket; leave accumulators empty until next tick
+                next_bucket = _bucket_of(now, _CADENCE)
+                _curr_bucket = next_bucket
+                _o = _h = _l = _c = None
+                _v_sum = 0.0
+                _pv_sum = 0.0
 
-    # --- one-time init --------------------------------------------------------
-    if "lt_init" not in st.session_state:
-        st.session_state.lt_init = True
-        st.session_state.lt_state = {
-            "df": pd.DataFrame(columns=["ts", "close", "vwap", "volume"]).astype(
-                {"ts": "datetime64[ns]", "close": "float64", "vwap": "float64", "volume": "float64"}
-            ),
-            "position": 0.0,
-            "cash": 1_000_000.0,  # starting cash for PnL calc
-            "equity": 1_000_000.0,
-            "trades": [],
-            "last_price": None,
-            "auto_trade": False,
-            "qty_per_trade": 1.0,
-            "ema_fast_span": 5,
-            "ema_slow_span": 20,
-        }
-        # Start the bar aggregator at 1-second cadence
-        tickbus.start_bar_aggregator(cadence_sec=1)
+def start_bar_aggregator(cadence_sec: int = 1) -> None:
+    """
+    Start the aggregator once (idempotent).
+    cadence_sec: integer seconds per bar (e.g., 1, 5, 60)
+    """
+    global _RUNNING, _CADENCE
+    if _RUNNING:
+        return
+    if cadence_sec <= 0:
+        cadence_sec = 1
+    _CADENCE = int(cadence_sec)
+    t = threading.Thread(target=_bar_flusher_loop, daemon=True, name="tickbus_flusher")
+    t.start()
+    _RUNNING = True
 
-    state = st.session_state.lt_state
+def drain_bars(max_items: int = 1000) -> List[Dict[str, Any]]:
+    """Drain emitted bars (OHLC/VWAP)."""
+    out: List[Dict[str, Any]] = []
+    for _ in range(max_items):
+        try:
+            out.append(_BAR_QUEUE.get_nowait())
+        except queue.Empty:
+            break
+    return out
 
-    # --- controls -------------------------------------------------------------
-    colA, colB, colC, colD = st.columns([1,1,1,1])
-    with colA:
-        state["auto_trade"] = st.toggle("Auto Trade", value=state["auto_trade"])
-    with colB:
-        state["qty_per_trade"] = st.number_input("Qty per trade", value=float(state["qty_per_trade"]), min_value=0.0, step=1.0)
-    with colC:
-        state["ema_fast_span"] = st.number_input("EMA Fast", value=int(state["ema_fast_span"]), min_value=2, step=1)
-    with colD:
-        state["ema_slow_span"] = st.number_input("EMA Slow", value=int(state["ema_slow_span"]), min_value=3, step=1)
+def drain_raw(max_items: int = 2000) -> List[Dict[str, Any]]:
+    """Drain raw ticks (for charts/debug)."""
+    out: List[Dict[str, Any]] = []
+    for _ in range(max_items):
+        try:
+            out.append(_RAW_TICKS.get_nowait())
+        except queue.Empty:
+            break
+    return out
 
-    st.caption(f"tickbus id: **{tickbus.BUS_ID}** | cadence: **1s** | heartbeat: **{tickbus.heartbeat_value()}**")
+def bar_to_str(bar: Dict[str, Any]) -> str:
+    return (f"[{int(bar['ts'])}->{int(bar['end_ts'])}|{bar['cadence']}s] "
+            f"O:{bar['open']:.2f} H:{bar['high']:.2f} L:{bar['low']:.2f} "
+            f"C:{bar['close']:.2f} VWAP:{bar['vwap']:.2f} V:{bar['volume']:.2f}")
 
-    # --- Simulation mode (optional) -------------------------------------------
-    with st.expander("Simulation Mode (no broker)", expanded=False):
-        sim_on = st.checkbox("Run price simulator (sine + noise)", value=False)
-        sim_speed = st.slider("Simulator ticks per second", 1.0, 50.0, 15.0, 0.5)
+# ---------------------------
+# Backward-compat shims
+# ---------------------------
+# Expose a queue named TICK_QUEUE (some UIs display it)
+TICK_QUEUE = _RAW_TICKS  # alias
 
-        if sim_on:
-            # emit a short burst each render; Streamlit reruns frequently
-            t0 = time.time()
-            for i in range(8):
-                phase = (t0 + i / sim_speed) * 0.7
-                price = 100.0 + 0.6 * math.sin(phase) + np.random.normal(0, 0.03)
-                tickbus.put_raw_tick({"ts": time.time(), "price": price, "size": 1})
+def put(x):
+    """
+    Legacy: accept a single tick or a list of ticks and push into the aggregator.
+    Tries to infer price/time/size from common keys.
+    """
+    batch = x if isinstance(x, list) else [x]
+    for item in batch:
+        if item is None:
+            continue
+        if isinstance(item, dict):
+            # ts
+            ts = item.get("ts")
+            if ts is None:
+                # try common time keys
+                for tk in ("ltt","last_trade_time","exchange_time","trade_time",
+                           "time","timestamp","datetime","created_at"):
+                    if tk in item and item[tk]:
+                        try:
+                            import pandas as _pd
+                            tsv = _pd.to_datetime(item[tk], utc=True, errors="coerce")
+                            ts = tsv.timestamp() if _pd.notna(tsv) else None
+                        except Exception:
+                            ts = None
+                        break
+            if ts is None:
+                ts = time.time()
 
-    # --- processing loop: drain bars once per render --------------------------
-    bars = tickbus.drain_bars()
-    if bars:
-        for b in bars:
-            maybe_trade_on_bar(b, state)
+            # price
+            px = item.get("price")
+            if px is None:
+                for k in ("last","Last","LAST","last_traded_price","LastTradedPrice","lastTradedPrice",
+                          "ltp","LTP","lastPrice","LastPrice","close","Close","price","Price"):
+                    if k in item and item[k] not in (None, ""):
+                        px = item[k]; break
+            if px is None:
+                continue
+            try:
+                px = float(str(px).replace(",", ""))
+            except Exception:
+                continue
 
-    # --- charts ---------------------------------------------------------------
-    df = state["df"].copy()
-    if not df.empty:
-        df = df.set_index("ts")
-        df["ema_fast"] = df["close"].ewm(span=state["ema_fast_span"], adjust=False).mean()
-        df["ema_slow"] = df["close"].ewm(span=state["ema_slow_span"], adjust=False).mean()
+            # size
+            sz = item.get("size") or item.get("volume") or item.get("qty") or 1.0
+            try:
+                sz = float(str(sz).replace(",", ""))
+            except Exception:
+                sz = 1.0
 
-        st.line_chart(df[["close", "ema_fast", "ema_slow"]])
+            put_raw_tick({"ts": ts, "price": px, "size": sz})
 
-    # --- positions & PnL ------------------------------------------------------
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Last Price", f"{state['last_price']:.4f}" if state["last_price"] else "—")
-    with c2:
-        st.metric("Position (qty)", f"{state['position']:.2f}")
-    with c3:
-        st.metric("Equity (sim)", f"{state['equity']:.2f}")
+        else:
+            # number/string → price; now time
+            try:
+                put_raw_tick({"ts": time.time(), "price": float(item), "size": 1.0})
+            except Exception:
+                pass
 
-    # --- trades table ---------------------------------------------------------
-    if state["trades"]:
-        tdf = pd.DataFrame(state["trades"])
-        tdf = tdf.sort_values("ts", ascending=False).reset_index(drop=True)
-        st.dataframe(tdf.head(50), use_container_width=True)
+def drain(max_items: int = 1000):
+    """Legacy: previously drained raw ticks; now return bars for compatibility with new pipeline."""
+    return drain_bars(max_items)
 
-    # --- gentle auto-refresh to keep UI updated -------------------------------
-    # NOTE: trading decisions are NOT tied to this timer; they run per emitted bar.
-    st.toast("Live loop tick", icon="⏱️")
-    st.experimental_rerun()
-# -----------------------------------------------------------------------------
+def heartbeat():
+    """Legacy alias."""
+    return heartbeat_value()
+
+# Simple global sequence for any code that calls tickbus.next_seq()
+_seq = 0
+_seq_lock = threading.Lock()
+def next_seq():
+    global _seq
+    with _seq_lock:
+        _seq += 1
+        return _seq
 
 
-# If you use tabs elsewhere:
-# tab1, tab2, tab3 = st.tabs(["Live Trading", "Backtest", "Settings"])
-# with tab1:
-#     render_live_trading_tab()
+# ---------------------------
+# Optional: debug main
+# ---------------------------
+if __name__ == "__main__":
+    print(f"[tickbus {BUS_ID}] demo")
+    start_bar_aggregator(cadence_sec=1)
+    import math
+    base = 100.0
+    t0 = time.time()
+    for i in range(250):
+        ts = t0 + i * 0.02
+        px = base + 0.8 * math.sin(i / 8.0)
+        put_raw_tick({"ts": ts, "price": px, "size": 1})
+        time.sleep(0.01)
+    for b in drain_bars():
+        print(bar_to_str(b))
+    print("heartbeat:", heartbeat_value())
