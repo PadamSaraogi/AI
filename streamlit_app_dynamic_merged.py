@@ -1095,6 +1095,7 @@ def process_bar_queue():
     df_new = pd.DataFrame(rows)
     st.session_state.live_data = (
         pd.concat([st.session_state.live_data, df_new], ignore_index=True)
+        .drop_duplicates(subset=["timestamp"], keep="last") 
         .tail(MAX_WINDOW_SIZE)
         .reset_index(drop=True)
     )
@@ -1442,19 +1443,38 @@ def make_candles_with_signals(df_bars: pd.DataFrame, trades: list, current_pos: 
               vol=("volume","sum"))
          .dropna(subset=["open","high","low","close"])
     )
+
     fig = go.Figure()
-    fig.add_trace(go.Candlestick(x=bars.index, open=bars["open"], high=bars["high"], low=bars["low"], close=bars["close"], name="Price"))
+    fig.add_trace(go.Candlestick(
+        x=bars.index, open=bars["open"], high=bars["high"],
+        low=bars["low"], close=bars["close"], name="Price"
+    ))
+
+    # --- helper to dedup + forward-fill onto minute grid ---
+    def _dedup_and_pad(series, target_index):
+        s = series.copy()
+        s = s.sort_index()
+        if not s.index.is_monotonic_increasing:
+            s = s.sort_index()
+        # drop duplicate timestamps, keep last
+        s = s[~s.index.duplicated(keep="last")]
+        # align to target (minute) index with pad
+        return s.reindex(target_index, method="pad")
+
     overlays = []
     if "ema_20" in d.columns:
-        ema20 = d.set_index("timestamp")["ema_20"].dropna().reindex(bars.index, method="pad")
+        s20 = d.set_index("timestamp")["ema_20"].dropna()
+        ema20 = _dedup_and_pad(s20, bars.index)
         overlays.append(("EMA 20", ema20))
     if "ema_50" in d.columns:
-        ema50 = d.set_index("timestamp")["ema_50"].dropna().reindex(bars.index, method="pad")
+        s50 = d.set_index("timestamp")["ema_50"].dropna()
+        ema50 = _dedup_and_pad(s50, bars.index)
         overlays.append(("EMA 50", ema50))
     for name, series in overlays:
-        fig.add_trace(go.Scatter(x=bars.index, y=series, mode="lines", name=name))
+        if not series.empty:
+            fig.add_trace(go.Scatter(x=series.index, y=series.values, mode="lines", name=name))
 
-    # Entry/exit markers (aligned to minute bars)
+    # Entry/exit markers (aligned to minute grid)
     buy_x, buy_y, sell_x, sell_y = [], [], [], []
     for t in trades or []:
         et = pd.to_datetime(t["entry_time"], errors="coerce")
@@ -1465,6 +1485,7 @@ def make_candles_with_signals(df_bars: pd.DataFrame, trades: list, current_pos: 
         if pd.notna(xt):
             xt_bar = bars.index.asof(xt)
             if pd.notna(xt_bar): sell_x.append(xt_bar); sell_y.append(bars.loc[xt_bar, "close"])
+
     if current_pos is not None:
         et = pd.to_datetime(current_pos["entry_time"], errors="coerce")
         if pd.notna(et):
@@ -1477,10 +1498,12 @@ def make_candles_with_signals(df_bars: pd.DataFrame, trades: list, current_pos: 
     if sell_x:
         fig.add_trace(go.Scatter(x=sell_x, y=sell_y, mode="markers", name="SELL/SHORT",
                                  marker=dict(symbol="triangle-down", size=12)))
+
     fig.update_layout(height=520, margin=dict(l=10,r=10,t=40,b=10),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
     fig.update_xaxes(showgrid=False); fig.update_yaxes(showgrid=True)
     return fig
+
 
 # ================= Render once =================
 def render_dashboard_once():
