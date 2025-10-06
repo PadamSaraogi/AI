@@ -1197,6 +1197,163 @@ with st.expander("🔑 Connection Settings", expanded=True):
         hb = getattr(tickbus, "heartbeat", lambda: 0)()
     st.caption(f"tickbus id: **{tickbus.BUS_ID}**  |  heartbeat: **{hb}**")
 
+# ================= Grid search & seeding (optional) =================
+
+def _normalize_grid_df(df: pd.DataFrame) -> pd.DataFrame:
+    # standardize column names
+    df = df.rename(columns={c: c.strip().replace(" ", "_").replace("-", "_") for c in df.columns})
+    # flexible rename map to our expected names
+    rename_map = {
+        "ml_thresh": "ml_threshold",
+        "ml_prob_threshold": "ml_threshold",
+        "prob_threshold": "ml_threshold",
+        "confidence_threshold": "ml_threshold",
+        "ml_threshold": "ml_threshold",
+
+        "adx_mult": "adx_target_mult",
+        "adx_gate_mult": "adx_target_mult",
+        "adx_target_mult": "adx_target_mult",
+
+        "trail": "trail_mult",
+        "trail_mult": "trail_mult",
+        "trailing_mult": "trail_mult",
+
+        "time_limit": "time_limit",
+        "hold_minutes": "time_limit",
+        "duration_limit": "time_limit",
+
+        "pnl": "total_pnl",
+        "total_pnl": "total_pnl",
+        "net_pnl": "total_pnl",
+
+        "max_dd": "max_drawdown",
+        "max_drawdown": "max_drawdown",
+
+        "trades": "trade_count",
+        "trade_count": "trade_count",
+    }
+    for src, dst in rename_map.items():
+        if src in df.columns and src != dst:
+            df.rename(columns={src: dst}, inplace=True)
+    # coerce numerics
+    for c in ["ml_threshold","adx_target_mult","trail_mult","time_limit","total_pnl","max_drawdown","trade_count"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    # sort preference
+    sort_cols, ascending = [], []
+    if "total_pnl" in df.columns:
+        sort_cols.append("total_pnl"); ascending.append(False)
+    if "max_drawdown" in df.columns:
+        sort_cols.append("max_drawdown"); ascending.append(True)
+    if "trade_count" in df.columns:
+        sort_cols.append("trade_count"); ascending.append(False)
+    if sort_cols:
+        df = df.sort_values(sort_cols, ascending=ascending, na_position="last").reset_index(drop=True)
+    return df
+
+def _apply_row_to_session(row: pd.Series):
+    # apply knobs if present
+    if "ml_threshold"  in row and pd.notna(row["ml_threshold"]):   st.session_state.conf_threshold = float(row["ml_threshold"])
+    if "adx_target_mult" in row and pd.notna(row["adx_target_mult"]): st.session_state.adx_target_mult = float(row["adx_target_mult"])
+    if "trail_mult"     in row and pd.notna(row["trail_mult"]):    st.session_state.trail_mult = float(row["trail_mult"])
+    if "time_limit"     in row and pd.notna(row["time_limit"]):    st.session_state.time_limit = int(row["time_limit"])
+
+with st.expander("🧪 Grid Search & Seeding (optional)", expanded=True):
+    colA, colB = st.columns(2)
+
+    # ---- Left: Upload any grid CSV, normalize, preview, pick & apply ----
+    with colA:
+        grid_file = st.file_uploader("Upload grid_search CSV", type=["csv"], key="gsu_any")
+        if grid_file is not None:
+            try:
+                gdf_raw = pd.read_csv(grid_file)
+                gdf = _normalize_grid_df(gdf_raw.copy())
+                show_cols = [c for c in ["ml_threshold","adx_target_mult","trail_mult","time_limit","total_pnl","max_drawdown","trade_count"] if c in gdf.columns]
+                st.dataframe(gdf.head(12)[show_cols] if show_cols else gdf.head(12))
+                idx = st.number_input("Pick a row to apply (0-based)", min_value=0, max_value=max(0, len(gdf)-1), value=0, step=1)
+                if st.button("Apply selected row"):
+                    _apply_row_to_session(gdf.iloc[int(idx)])
+                    st.success(
+                        f"Applied → conf ≥ {st.session_state.conf_threshold:.2f} | "
+                        f"ADX × {st.session_state.adx_target_mult:.2f} | "
+                        f"trail × {st.session_state.trail_mult:.2f} | "
+                        f"time {st.session_state.time_limit}m"
+                    )
+            except Exception as e:
+                st.error(f"Grid parse error: {e}")
+
+        st.session_state.conf_threshold = st.slider("Model confidence threshold", 0.50, 0.95, float(st.session_state.conf_threshold), 0.01)
+        st.session_state.adx_target_mult = st.slider("ADX gate multiplier", 0.0, 3.0, float(st.session_state.adx_target_mult), 0.1)
+        st.session_state.time_limit = st.number_input("Max holding time (minutes, 0=disabled)", min_value=0, value=int(st.session_state.time_limit), step=1)
+        st.checkbox("Enable Auto-Trade", key="auto_trade", value=st.session_state.get("auto_trade", True))
+
+    # ---- Right: Auto-apply from normalized file if present ----
+    with colB:
+        st.caption("If you’ve already normalized your grid file, place it at `/mnt/data/grid_search_normalized.csv`.")
+        norm_path = "/mnt/data/grid_search_normalized.csv"
+        exists = os.path.exists(norm_path)
+        st.write(f"Normalized file present: **{'Yes' if exists else 'No'}**")
+
+        auto_apply = st.checkbox("Auto-apply best row on boot (from normalized file)", value=st.session_state.get("gs_auto_apply", True))
+        st.session_state["gs_auto_apply"] = auto_apply
+        if "gs_applied_once" not in st.session_state:
+            st.session_state["gs_applied_once"] = False
+
+        def _auto_apply_best_now():
+            try:
+                gdf_raw = pd.read_csv(norm_path)
+                gdf = _normalize_grid_df(gdf_raw.copy())
+                if not gdf.empty:
+                    _apply_row_to_session(gdf.iloc[0])
+                    st.session_state["gs_applied_once"] = True
+                    st.success(
+                        f"Auto-applied best row → conf ≥ {st.session_state.conf_threshold:.2f} | "
+                        f"ADX × {st.session_state.adx_target_mult:.2f} | "
+                        f"trail × {st.session_state.trail_mult:.2f} | "
+                        f"time {st.session_state.time_limit}m"
+                    )
+                else:
+                    st.info("Normalized grid file is empty after normalization.")
+            except Exception as e:
+                st.error(f"Auto-apply error: {e}")
+
+        # auto-apply once per session if file exists and toggle is on
+        if exists and auto_apply and not st.session_state["gs_applied_once"]:
+            _auto_apply_best_now()
+
+        if st.button("Apply best from normalized file now", disabled=not exists):
+            _auto_apply_best_now()
+
+    # ---- 1-minute OHLC seeding (unchanged, kept for faster warmup) ----
+    st.markdown("---")
+    seed_file = st.file_uploader("Upload 1-minute OHLC seed (CSV)", type=["csv"], key="seed_1m")
+    st.caption("Expected columns: timestamp, open, high, low, close, (volume optional) — timestamps interpreted in IST.")
+    if seed_file is not None:
+        try:
+            seed = pd.read_csv(seed_file)
+            for c in list(seed.columns):
+                if c.lower() == "datetime":
+                    seed.rename(columns={c: "timestamp"}, inplace=True)
+            seed["timestamp"] = pd.to_datetime(seed["timestamp"], errors="coerce")
+            if getattr(seed["timestamp"].dt, "tz", None) is None:
+                seed["timestamp"] = seed["timestamp"].dt.tz_localize(IST)
+            seed = seed.dropna(subset=["timestamp"]).sort_values("timestamp")
+            seed_df = pd.DataFrame({
+                "timestamp": seed["timestamp"],
+                "last_traded_price": pd.to_numeric(seed["close"], errors="coerce"),
+                "volume": pd.to_numeric(seed.get("volume", 0), errors="coerce").fillna(0),
+                "raw": "seed"
+            }).dropna(subset=["last_traded_price"])
+            st.session_state.live_data = (
+                pd.concat([seed_df, st.session_state.live_data], ignore_index=True)
+                .tail(MAX_WINDOW_SIZE).reset_index(drop=True)
+            )
+            st.session_state.live_data = calculate_indicators_live(st.session_state.live_data.copy())
+            st.success(f"Seeded {len(seed_df)} bars → indicators ready sooner (ADX/BB/return_1h).")
+        except Exception as e:
+            st.error(f"Seed parse error: {e}")
+
+
 # ================= Connect (UI thread only) =================
 if connect_pressed and st.session_state.get("breeze") is None:
     if BreezeConnect is None:
