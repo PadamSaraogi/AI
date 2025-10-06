@@ -1,12 +1,20 @@
 """
 tickbus.py — robust event bus + bar aggregator (1s by default)
 
-Improvements:
-- Timestamp clamp: if tick ts is >±10s from wall clock, use time.time()
-- Future-bucket recovery: if bucket jumped far ahead, snap back to now
-- Debug logs for emissions
-- Manual flush: flush_now()
+Features
+- Thread-safe raw tick intake at any rate
+- Deterministic OHLC/VWAP/Volume bars at fixed cadence (default 1s)
+- Timestamp clamp to avoid future/past buckets stalling emission
+- Safe emission (never crashes if a flush happens before first tick)
+- Manual flush + lightweight debug logging
 - Back-compat shims: put(), drain(), heartbeat(), TICK_QUEUE, next_seq()
+
+Usage
+------
+import tickbus
+tickbus.start_bar_aggregator(cadence_sec=1)
+tickbus.put_raw_tick({"ts": time.time(), "price": 123.45, "size": 1.0})
+bars = tickbus.drain_bars()
 """
 
 from __future__ import annotations
@@ -17,9 +25,7 @@ import queue
 import threading
 from typing import Dict, Any, List, Optional
 
-# ---------------------------
-# Diagnostics
-# ---------------------------
+# --------------------------- Diagnostics ---------------------------
 BUS_ID = os.environ.get("TICKBUS_ID", str(uuid.uuid4())[:8])
 
 _HEARTBEAT = 0
@@ -43,15 +49,11 @@ def _log(msg: str):
     if _DEBUG:
         print(f"[tickbus {BUS_ID}] {msg}", flush=True)
 
-# ---------------------------
-# Queues
-# ---------------------------
+# --------------------------- Queues ---------------------------
 _RAW_TICKS: "queue.Queue[Dict[str, Any]]" = queue.Queue()
 _BAR_QUEUE: "queue.Queue[Dict[str, Any]]" = queue.Queue()
 
-# ---------------------------
-# Aggregator state
-# ---------------------------
+# --------------------------- Aggregator state ---------------------------
 _BAR_LOCK = threading.Lock()
 _RUNNING = False
 _CADENCE = 1  # seconds
@@ -62,8 +64,8 @@ _o = _h = _l = _c = None
 _v_sum = 0.0
 _pv_sum = 0.0
 
-# thresholds
-_TS_SKEW_SEC = 10  # clamp ticks that are >±10s away from wall clock
+# Timestamp skew clamp (avoid stalling on future/past timestamps)
+_TS_SKEW_SEC = 10
 
 def _bucket_of(ts: float, cadence: int) -> int:
     sec = int(ts)
@@ -71,10 +73,10 @@ def _bucket_of(ts: float, cadence: int) -> int:
 
 def put_raw_tick(tick: Dict[str, Any]) -> None:
     """
-    Public: enqueue a raw tick and update aggregator.
+    Enqueue a raw tick and update the current bar.
 
     tick:
-      ts:   float|int epoch seconds (optional; uses time.time() if missing)
+      ts:    float|int epoch seconds (optional; uses time.time() if missing)
       price: float (required)
       size:  float (optional; default 1.0)
     """
@@ -90,52 +92,45 @@ def put_raw_tick(tick: Dict[str, Any]) -> None:
         ts = time.time()
 
     now = time.time()
-    # Clamp wild timestamps to wall clock to avoid “future/ancient” buckets
     if abs(ts - now) > _TS_SKEW_SEC:
-        ts = now
+        ts = now  # clamp wild timestamps
 
     # normalize price/size
-    px_raw = tick["price"]
     try:
-        px = float(str(px_raw).replace(",", ""))
+        px = float(str(tick["price"]).replace(",", ""))
     except Exception:
         return
-
-    sz_raw = tick.get("size", 1.0)
     try:
-        sz = float(str(sz_raw).replace(",", ""))
+        sz = float(str(tick.get("size", 1.0)).replace(",", ""))
     except Exception:
         sz = 1.0
 
-    # Store raw tick (optional consumer: charts/debug)
+    # store raw tick (optional consumer)
     _RAW_TICKS.put({"ts": ts, "price": px, "size": sz})
 
     bucket = _bucket_of(ts, _CADENCE)
 
     with _BAR_LOCK:
-        # Future-bucket recovery: if somehow _curr_bucket is far ahead of now, reset
+        # recover if current bucket somehow drifted far into the future
         if _curr_bucket is not None and _curr_bucket - now > 5 * _CADENCE:
-            _log(f"recover: future bucket {_curr_bucket} >> now {now:.3f}; snapping to now")
+            _log(f"recover: future bucket {_curr_bucket} >> now {now:.3f}; snap to now")
             _curr_bucket = _bucket_of(now, _CADENCE)
             _o = _h = _l = _c = None
             _v_sum = 0.0
             _pv_sum = 0.0
 
         if _curr_bucket is None:
-            # initialize bar
             _curr_bucket = bucket
             _o = _h = _l = _c = px
             _v_sum = sz
             _pv_sum = px * sz
         elif bucket == _curr_bucket:
-            # update current bar
             _c = px
             _h = px if (_h is None or px > _h) else _h
             _l = px if (_l is None or px < _l) else _l
             _v_sum += sz
             _pv_sum += px * sz
         else:
-            # boundary crossed: emit previous, start new
             _emit_current_bar_locked()
             _curr_bucket = bucket
             _o = _h = _l = _c = px
@@ -145,31 +140,39 @@ def put_raw_tick(tick: Dict[str, Any]) -> None:
     heartbeat_inc()
 
 def _emit_current_bar_locked() -> None:
-    """Emit the current bar. Must be called under _BAR_LOCK."""
+    """Emit the current bar if we have prices; tolerate partial state. Must hold _BAR_LOCK."""
     global _curr_bucket, _o, _h, _l, _c, _v_sum, _pv_sum
-    if _curr_bucket is None or _c is None:
+    if _curr_bucket is None:
         return
-    vwap = (_pv_sum / _v_sum) if _v_sum > 0 else _c
+
+    # If nothing priced this bucket yet, skip
+    if _o is None and _h is None and _l is None and _c is None:
+        return
+
+    # Synthesize missing fields from the best available ref
+    ref = _c if _c is not None else (_o if _o is not None else (_h if _h is not None else _l))
+    o = _o if _o is not None else ref
+    h = _h if _h is not None else ref
+    l = _l if _l is not None else ref
+    c = _c if _c is not None else ref
+
+    vwap = (_pv_sum / _v_sum) if (_v_sum and _v_sum > 0) else c
     bar = {
-        "ts": float(_curr_bucket),   # start time of the bar
+        "ts": float(_curr_bucket),
         "end_ts": float(_curr_bucket + _CADENCE),
         "cadence": _CADENCE,
-        "open": float(_o),
-        "high": float(_h),
-        "low": float(_l),
-        "close": float(_c),
+        "open": float(o),
+        "high": float(h),
+        "low":  float(l),
+        "close": float(c),
         "vwap": float(vwap),
-        "volume": float(_v_sum),
+        "volume": float(_v_sum or 0.0),
     }
     _BAR_QUEUE.put(bar)
-    _log(f"emit bar: [{int(bar['ts'])}->{int(bar['end_ts'])}] O={bar['open']:.2f} C={bar['close']:.2f} V={bar['volume']:.2f}")
+    _log(f"emit bar: [{int(bar['ts'])}->{int(bar['end_ts'])}] O={bar['open']:.4f} C={bar['close']:.4f} V={bar['volume']:.2f}")
 
 def _bar_flusher_loop() -> None:
-    """
-    Background thread: on cadence boundary, flush bar even if no new ticks.
-    Emits a 'carry' bar for quiet intervals (volume may be zero).
-    Also recovers if current bucket drifted into the future.
-    """
+    """Flush bar on cadence boundary even without new ticks. Also recover future buckets."""
     global _curr_bucket, _o, _h, _l, _c, _v_sum, _pv_sum
     while True:
         time.sleep(0.05)
@@ -178,7 +181,7 @@ def _bar_flusher_loop() -> None:
             if _curr_bucket is None:
                 continue
 
-            # Recover from future bucket
+            # Recover from far-future bucket
             if _curr_bucket - now > 5 * _CADENCE:
                 _log(f"flusher recover: future bucket {_curr_bucket} >> now {now:.3f}")
                 _curr_bucket = _bucket_of(now, _CADENCE)
@@ -188,19 +191,16 @@ def _bar_flusher_loop() -> None:
                 continue
 
             if now >= (_curr_bucket + _CADENCE):
-                _emit_current_bar_locked()
-                # advance to next bucket; leave accumulators empty until next tick
-                next_bucket = _bucket_of(now, _CADENCE)
-                _curr_bucket = next_bucket
+                # emit only if priced; else silently advance
+                if not (_o is None and _h is None and _l is None and _c is None):
+                    _emit_current_bar_locked()
+                _curr_bucket = _bucket_of(now, _CADENCE)
                 _o = _h = _l = _c = None
                 _v_sum = 0.0
                 _pv_sum = 0.0
 
 def start_bar_aggregator(cadence_sec: int = 1) -> None:
-    """
-    Start the aggregator once (idempotent).
-    cadence_sec: integer seconds per bar (e.g., 1, 5, 60)
-    """
+    """Start the aggregator once (idempotent)."""
     global _RUNNING, _CADENCE
     if _RUNNING:
         return
@@ -213,10 +213,7 @@ def start_bar_aggregator(cadence_sec: int = 1) -> None:
     _log(f"aggregator started, cadence={_CADENCE}s")
 
 def flush_now() -> bool:
-    """
-    Manually flush the current bar immediately.
-    Returns True if a bar was emitted.
-    """
+    """Manually flush the current bar now. Returns True if a bar was emitted."""
     with _BAR_LOCK:
         before = _BAR_QUEUE.qsize()
         _emit_current_bar_locked()
@@ -248,16 +245,11 @@ def bar_to_str(bar: Dict[str, Any]) -> str:
             f"O:{bar['open']:.2f} H:{bar['high']:.2f} L:{bar['low']:.2f} "
             f"C:{bar['close']:.2f} VWAP:{bar['vwap']:.2f} V:{bar['volume']:.2f}")
 
-# ---------------------------
-# Backward-compat shims
-# ---------------------------
-TICK_QUEUE = _RAW_TICKS  # alias
+# --------------------------- Backward-compat shims ---------------------------
+TICK_QUEUE = _RAW_TICKS  # alias for UIs
 
 def put(x):
-    """
-    Legacy: accept a single tick or a list of ticks and push into the aggregator.
-    Tries to infer price/time/size from common keys.
-    """
+    """Legacy: accept tick(s) with varying shapes and push into aggregator."""
     batch = x if isinstance(x, list) else [x]
     for item in batch:
         if item is None:
@@ -266,8 +258,7 @@ def put(x):
             # ts
             ts = item.get("ts")
             if ts is None:
-                for tk in ("ltt","last_trade_time","exchange_time","trade_time",
-                           "time","timestamp","datetime","created_at"):
+                for tk in ("ltt","last_trade_time","exchange_time","trade_time","time","timestamp","datetime","created_at"):
                     v = item.get(tk)
                     if v:
                         try:
@@ -279,7 +270,6 @@ def put(x):
                         break
             if ts is None:
                 ts = time.time()
-
             # price
             px = item.get("price")
             if px is None:
@@ -294,16 +284,13 @@ def put(x):
                 px = float(str(px).replace(",", ""))
             except Exception:
                 continue
-
             # size
             sz = item.get("size") or item.get("volume") or item.get("qty") or 1.0
             try:
                 sz = float(str(sz).replace(",", ""))
             except Exception:
                 sz = 1.0
-
             put_raw_tick({"ts": ts, "price": px, "size": sz})
-
         else:
             try:
                 put_raw_tick({"ts": time.time(), "price": float(item), "size": 1.0})
@@ -311,7 +298,7 @@ def put(x):
                 pass
 
 def drain(max_items: int = 1000):
-    """Legacy: return bars for compatibility with new pipeline."""
+    """Legacy: return bars (new pipeline)."""
     return drain_bars(max_items)
 
 def heartbeat():
@@ -326,9 +313,7 @@ def next_seq():
         _seq += 1
         return _seq
 
-# ---------------------------
-# Optional: debug main
-# ---------------------------
+# --------------------------- Debug main ---------------------------
 if __name__ == "__main__":
     enable_debug(True)
     print(f"[tickbus {BUS_ID}] demo")
@@ -337,15 +322,13 @@ if __name__ == "__main__":
     base = 100.0
     t0 = time.time()
     # inject a few odd timestamps to prove clamping
-    put_raw_tick({"ts": t0 + 3600, "price": base, "size": 1})   # future; will clamp to now
+    put_raw_tick({"ts": t0 + 3600, "price": base, "size": 1})
     for i in range(150):
         ts = time.time()
         px = base + 0.8 * math.sin(i / 8.0)
         put_raw_tick({"ts": ts, "price": px, "size": 1})
         time.sleep(0.02)
-    # force a final flush
     flush_now()
-    bars = drain_bars()
-    for b in bars[-10:]:
+    for b in drain_bars()[-10:]:
         print(bar_to_str(b))
     print("heartbeat:", heartbeat_value())
