@@ -780,6 +780,7 @@ with tab2:
 
     # ✅ start 1-Hz (configurable) bar aggregator once
     try:
+        tickbus.enable_debug(True)
         tickbus.start_bar_aggregator(cadence_sec=1)   # 1-second bars
     except Exception as _e:
         lg.info(f"tickbus aggregator start: {_e}")
