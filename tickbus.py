@@ -1,33 +1,17 @@
 """
-tickbus.py
-Event bus + bar aggregator for live ticks.
+tickbus.py — robust event bus + bar aggregator (1s by default)
 
-- Thread-safe raw tick ingestion at any rate.
-- Deterministic bar aggregation at fixed cadence (default 1 second).
-- Emits OHLC, VWAP, Volume bars you can drain in your trading loop.
-- Diagnostics: BUS_ID + heartbeat counter.
-- Backward-compat shims for legacy calls: put(), drain(), heartbeat(), TICK_QUEUE, next_seq().
-
-Usage
-------
-import tickbus
-
-tickbus.start_bar_aggregator(cadence_sec=1)  # start once (1-second bars)
-
-# push raw ticks from your broker callback:
-tickbus.put_raw_tick({"ts": time.time(), "price": 123.45, "size": 1.0})
-
-# in your processing loop (UI or worker):
-bars = tickbus.drain_bars()
-for bar in bars:
-    # bar: {ts, end_ts, cadence, open, high, low, close, vwap, volume}
-    ...
+Improvements:
+- Timestamp clamp: if tick ts is >±10s from wall clock, use time.time()
+- Future-bucket recovery: if bucket jumped far ahead, snap back to now
+- Debug logs for emissions
+- Manual flush: flush_now()
+- Back-compat shims: put(), drain(), heartbeat(), TICK_QUEUE, next_seq()
 """
 
 from __future__ import annotations
 import os
 import time
-import json
 import uuid
 import queue
 import threading
@@ -40,6 +24,11 @@ BUS_ID = os.environ.get("TICKBUS_ID", str(uuid.uuid4())[:8])
 
 _HEARTBEAT = 0
 _HB_LOCK = threading.Lock()
+_DEBUG = bool(int(os.environ.get("TICKBUS_DEBUG", "0")))
+
+def enable_debug(on: bool = True):
+    global _DEBUG
+    _DEBUG = bool(on)
 
 def heartbeat_inc(n: int = 1) -> None:
     global _HEARTBEAT
@@ -49,6 +38,10 @@ def heartbeat_inc(n: int = 1) -> None:
 def heartbeat_value() -> int:
     with _HB_LOCK:
         return _HEARTBEAT
+
+def _log(msg: str):
+    if _DEBUG:
+        print(f"[tickbus {BUS_ID}] {msg}", flush=True)
 
 # ---------------------------
 # Queues
@@ -69,6 +62,9 @@ _o = _h = _l = _c = None
 _v_sum = 0.0
 _pv_sum = 0.0
 
+# thresholds
+_TS_SKEW_SEC = 10  # clamp ticks that are >±10s away from wall clock
+
 def _bucket_of(ts: float, cadence: int) -> int:
     sec = int(ts)
     return (sec // cadence) * cadence
@@ -87,31 +83,44 @@ def put_raw_tick(tick: Dict[str, Any]) -> None:
     if not isinstance(tick, dict) or "price" not in tick:
         return
 
+    # normalize ts
     try:
         ts = float(tick.get("ts", time.time()))
     except Exception:
         ts = time.time()
 
+    now = time.time()
+    # Clamp wild timestamps to wall clock to avoid “future/ancient” buckets
+    if abs(ts - now) > _TS_SKEW_SEC:
+        ts = now
+
     # normalize price/size
-    px = tick["price"]
+    px_raw = tick["price"]
     try:
-        px = float(str(px).replace(",", ""))
+        px = float(str(px_raw).replace(",", ""))
     except Exception:
         return
 
-    sz = tick.get("size", 1.0)
+    sz_raw = tick.get("size", 1.0)
     try:
-        sz = float(str(sz).replace(",", ""))
+        sz = float(str(sz_raw).replace(",", ""))
     except Exception:
         sz = 1.0
 
-    # Store raw tick (optional consumer: charts / debug)
+    # Store raw tick (optional consumer: charts/debug)
     _RAW_TICKS.put({"ts": ts, "price": px, "size": sz})
 
-    # Aggregate into cadence bucket
     bucket = _bucket_of(ts, _CADENCE)
 
     with _BAR_LOCK:
+        # Future-bucket recovery: if somehow _curr_bucket is far ahead of now, reset
+        if _curr_bucket is not None and _curr_bucket - now > 5 * _CADENCE:
+            _log(f"recover: future bucket {_curr_bucket} >> now {now:.3f}; snapping to now")
+            _curr_bucket = _bucket_of(now, _CADENCE)
+            _o = _h = _l = _c = None
+            _v_sum = 0.0
+            _pv_sum = 0.0
+
         if _curr_bucket is None:
             # initialize bar
             _curr_bucket = bucket
@@ -153,19 +162,31 @@ def _emit_current_bar_locked() -> None:
         "volume": float(_v_sum),
     }
     _BAR_QUEUE.put(bar)
+    _log(f"emit bar: [{int(bar['ts'])}->{int(bar['end_ts'])}] O={bar['open']:.2f} C={bar['close']:.2f} V={bar['volume']:.2f}")
 
 def _bar_flusher_loop() -> None:
     """
     Background thread: on cadence boundary, flush bar even if no new ticks.
     Emits a 'carry' bar for quiet intervals (volume may be zero).
+    Also recovers if current bucket drifted into the future.
     """
     global _curr_bucket, _o, _h, _l, _c, _v_sum, _pv_sum
     while True:
-        time.sleep(0.05)  # fine-grained boundary detection
+        time.sleep(0.05)
         now = time.time()
         with _BAR_LOCK:
             if _curr_bucket is None:
                 continue
+
+            # Recover from future bucket
+            if _curr_bucket - now > 5 * _CADENCE:
+                _log(f"flusher recover: future bucket {_curr_bucket} >> now {now:.3f}")
+                _curr_bucket = _bucket_of(now, _CADENCE)
+                _o = _h = _l = _c = None
+                _v_sum = 0.0
+                _pv_sum = 0.0
+                continue
+
             if now >= (_curr_bucket + _CADENCE):
                 _emit_current_bar_locked()
                 # advance to next bucket; leave accumulators empty until next tick
@@ -189,6 +210,18 @@ def start_bar_aggregator(cadence_sec: int = 1) -> None:
     t = threading.Thread(target=_bar_flusher_loop, daemon=True, name="tickbus_flusher")
     t.start()
     _RUNNING = True
+    _log(f"aggregator started, cadence={_CADENCE}s")
+
+def flush_now() -> bool:
+    """
+    Manually flush the current bar immediately.
+    Returns True if a bar was emitted.
+    """
+    with _BAR_LOCK:
+        before = _BAR_QUEUE.qsize()
+        _emit_current_bar_locked()
+        after = _BAR_QUEUE.qsize()
+    return after > before
 
 def drain_bars(max_items: int = 1000) -> List[Dict[str, Any]]:
     """Drain emitted bars (OHLC/VWAP)."""
@@ -218,7 +251,6 @@ def bar_to_str(bar: Dict[str, Any]) -> str:
 # ---------------------------
 # Backward-compat shims
 # ---------------------------
-# Expose a queue named TICK_QUEUE (some UIs display it)
 TICK_QUEUE = _RAW_TICKS  # alias
 
 def put(x):
@@ -234,13 +266,13 @@ def put(x):
             # ts
             ts = item.get("ts")
             if ts is None:
-                # try common time keys
                 for tk in ("ltt","last_trade_time","exchange_time","trade_time",
                            "time","timestamp","datetime","created_at"):
-                    if tk in item and item[tk]:
+                    v = item.get(tk)
+                    if v:
                         try:
                             import pandas as _pd
-                            tsv = _pd.to_datetime(item[tk], utc=True, errors="coerce")
+                            tsv = _pd.to_datetime(v, utc=True, errors="coerce")
                             ts = tsv.timestamp() if _pd.notna(tsv) else None
                         except Exception:
                             ts = None
@@ -253,8 +285,9 @@ def put(x):
             if px is None:
                 for k in ("last","Last","LAST","last_traded_price","LastTradedPrice","lastTradedPrice",
                           "ltp","LTP","lastPrice","LastPrice","close","Close","price","Price"):
-                    if k in item and item[k] not in (None, ""):
-                        px = item[k]; break
+                    v = item.get(k)
+                    if v not in (None, ""):
+                        px = v; break
             if px is None:
                 continue
             try:
@@ -272,21 +305,19 @@ def put(x):
             put_raw_tick({"ts": ts, "price": px, "size": sz})
 
         else:
-            # number/string → price; now time
             try:
                 put_raw_tick({"ts": time.time(), "price": float(item), "size": 1.0})
             except Exception:
                 pass
 
 def drain(max_items: int = 1000):
-    """Legacy: previously drained raw ticks; now return bars for compatibility with new pipeline."""
+    """Legacy: return bars for compatibility with new pipeline."""
     return drain_bars(max_items)
 
 def heartbeat():
     """Legacy alias."""
     return heartbeat_value()
 
-# Simple global sequence for any code that calls tickbus.next_seq()
 _seq = 0
 _seq_lock = threading.Lock()
 def next_seq():
@@ -295,21 +326,26 @@ def next_seq():
         _seq += 1
         return _seq
 
-
 # ---------------------------
 # Optional: debug main
 # ---------------------------
 if __name__ == "__main__":
+    enable_debug(True)
     print(f"[tickbus {BUS_ID}] demo")
     start_bar_aggregator(cadence_sec=1)
     import math
     base = 100.0
     t0 = time.time()
-    for i in range(250):
-        ts = t0 + i * 0.02
+    # inject a few odd timestamps to prove clamping
+    put_raw_tick({"ts": t0 + 3600, "price": base, "size": 1})   # future; will clamp to now
+    for i in range(150):
+        ts = time.time()
         px = base + 0.8 * math.sin(i / 8.0)
         put_raw_tick({"ts": ts, "price": px, "size": 1})
-        time.sleep(0.01)
-    for b in drain_bars():
+        time.sleep(0.02)
+    # force a final flush
+    flush_now()
+    bars = drain_bars()
+    for b in bars[-10:]:
         print(bar_to_str(b))
     print("heartbeat:", heartbeat_value())
