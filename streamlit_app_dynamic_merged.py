@@ -766,8 +766,8 @@ with tab2:
 
 # ================= Hard-coded Breeze credentials (fill these in code) =================
 # ⚠️ Put your real keys here (do NOT commit them to git)
-BREEZE_API_KEY    = "=4c730660p24@d03%65343MG909o217L"
-BREEZE_API_SECRET = "416D2gJdy064P7F7)s5e590J8I1692~7"
+    BREEZE_API_KEY    = "=4c730660p24@d03%65343MG909o217L"
+    BREEZE_API_SECRET = "416D2gJdy064P7F7)s5e590J8I1692~7"
 
 def _keys_ok() -> bool:
     bad = (
