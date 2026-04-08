@@ -26,7 +26,7 @@ import io
 import pytz  # <<< NEW
 IST = pytz.timezone("Asia/Kolkata")  # <<< NEW (Gurgaon/India standard time)
 
-st.set_page_config(layout="wide")
+st.set_page_config(page_title="Live Trading Dashboard", layout="wide")
 st.markdown("""
     <div style='display: flex; align-items: center;'>
         <img src='https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/React-icon.svg/512px-React-icon.svg.png' width='60'>
@@ -778,7 +778,6 @@ with tab2:
 
 
     # ================= Page title & constants =================
-    st.set_page_config(page_title="Live Trading Dashboard", layout="wide")
     st.title("📊 Live Trading Dashboard")
     MAX_WINDOW_SIZE  = 15000
     RENDER_SLEEP_SEC = 1
