@@ -9,7 +9,7 @@ export default function Home() {
     // Inject the stlite styles
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = 'https://cdn.jsdelivr.net/npm/@stlite/mountable@0.75.0/build/style.css';
+    link.href = 'https://cdn.jsdelivr.net/npm/@stlite/mountable@0.75.0/build/stlite.css';
     document.head.appendChild(link);
 
     // Inject the stlite script
