@@ -24,7 +24,7 @@ export default function Home() {
             "numpy",
             "matplotlib",
             "plotly",
-            // "ta", // Removed as we are bundling it manually below
+            // "ta", // Bundled manually below
             "joblib",
             "scikit-learn",
             "breeze-connect",
@@ -42,6 +42,8 @@ export default function Home() {
             "tickbus.py": {
               url: "/tickbus.py"
             },
+            // Mock compatibility layer
+            "ssl.py": { url: "/ssl.py" },
             // Bundled ta library files
             "ta/__init__.py": { url: "/ta/__init__.py" },
             "ta/momentum.py": { url: "/ta/momentum.py" },
