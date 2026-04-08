@@ -20,5 +20,12 @@ OP_NO_SSLv2 = 0
 OP_NO_SSLv3 = 0
 OP_NO_TLSv1 = 0
 
+# Urllib3/Requests compatibility
+OPENSSL_VERSION = "OpenSSL 1.1.1  11 Sep 2018"
+OPENSSL_VERSION_NUMBER = 269488319
+OPENSSL_VERSION_INFO = (1, 1, 1, 0, 15)
+HAS_SNI = True
+HAS_ECDHE = True
+
 class SSLError(Exception):
     pass
