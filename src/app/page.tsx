@@ -24,7 +24,7 @@ export default function Home() {
             "numpy",
             "matplotlib",
             "plotly",
-            "ta",
+            // "ta", // Removed as we are bundling it manually below
             "joblib",
             "scikit-learn",
             "breeze-connect",
@@ -40,7 +40,16 @@ export default function Home() {
             },
             "tickbus.py": {
               url: "/tickbus.py"
-            }
+            },
+            // Bundled ta library files
+            "ta/__init__.py": { url: "/ta/__init__.py" },
+            "ta/momentum.py": { url: "/ta/momentum.py" },
+            "ta/others.py": { url: "/ta/others.py" },
+            "ta/trend.py": { url: "/ta/trend.py" },
+            "ta/utils.py": { url: "/ta/utils.py" },
+            "ta/volatility.py": { url: "/ta/volatility.py" },
+            "ta/volume.py": { url: "/ta/volume.py" },
+            "ta/wrapper.py": { url: "/ta/wrapper.py" },
           },
           container: mountPoint.current,
         });
@@ -50,7 +59,9 @@ export default function Home() {
 
     return () => {
       document.head.removeChild(link);
-      document.body.removeChild(script);
+      if (document.body.contains(script)) {
+        document.body.removeChild(script);
+      }
     };
   }, []);
 
