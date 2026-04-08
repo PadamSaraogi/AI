@@ -6,10 +6,19 @@ export default function Home() {
   const mountPoint = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && mountPoint.current) {
-      // Dynamically import stlite to avoid SSR issues and ensure browser environment
-      import('@stlite/mountable').then((stlite) => {
-        stlite.mount({
+    // Inject the stlite styles
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://cdn.jsdelivr.net/npm/@stlite/mountable@0.75.0/build/style.css';
+    document.head.appendChild(link);
+
+    // Inject the stlite script
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/@stlite/mountable@0.75.0/build/stlite.js';
+    script.async = true;
+    script.onload = () => {
+      if ((window as any).stlite && mountPoint.current) {
+        (window as any).stlite.mount({
           requirements: [
             "pandas",
             "numpy",
@@ -35,8 +44,14 @@ export default function Home() {
           },
           container: mountPoint.current,
         });
-      });
-    }
+      }
+    };
+    document.body.appendChild(script);
+
+    return () => {
+      document.head.removeChild(link);
+      document.body.removeChild(script);
+    };
   }, []);
 
   return (
@@ -48,7 +63,7 @@ export default function Home() {
         position: 'fixed', 
         top: 0, 
         left: 0,
-        backgroundColor: '#0e1117' // Match Streamlit's dark theme default
+        backgroundColor: '#0e1117' 
       }} 
     />
   );
