@@ -177,21 +177,46 @@ export default function Home() {
                     <div className="glass-card">
                       <div className="metric-label">Collective Net PnL</div>
                       <div className="metric-value" style={{ color: 'var(--primary)' }}>
-                        ₹{Object.values(backtestResults).reduce((acc: any, curr: any) => acc + curr.metrics.net_pnl, 0).toLocaleString()}
+                        ₹{(Object.values(backtestResults) as any[]).reduce((acc: any, curr: any) => acc + curr.metrics.net_pnl, 0).toLocaleString()}
                       </div>
                     </div>
                     <div className="glass-card">
                       <div className="metric-label">Avg Win Rate</div>
                       <div className="metric-value">
-                        {(Object.values(backtestResults).reduce((acc: any, curr: any) => acc + curr.metrics.win_rate, 0) / Object.keys(backtestResults).length * 100).toFixed(1)}%
+                        {((Object.values(backtestResults) as any[]).reduce((acc: any, curr: any) => acc + curr.metrics.win_rate, 0) / Object.keys(backtestResults).length * 100).toFixed(1)}%
                       </div>
                     </div>
                     <div className="glass-card">
                       <div className="metric-label">Total Trades</div>
                       <div className="metric-value">
-                        {Object.values(backtestResults).reduce((acc: any, curr: any) => acc + curr.metrics.total_trades, 0)}
+                        {(Object.values(backtestResults) as any[]).reduce((acc: any, curr: any) => acc + curr.metrics.total_trades, 0)}
                       </div>
                     </div>
+                  </div>
+
+                  {/* Combined Portfolio Equity Curve */}
+                  <div className="glass-card" style={{ height: '500px', marginBottom: '32px' }}>
+                    <div className="metric-label" style={{ marginBottom: '24px' }}>Combined Portfolio Equity Curve</div>
+                    <Plot
+                      data={(Object.entries(backtestResults) as any[]).map(([symbol, data]: [string, any]) => ({
+                        x: Object.keys(data.equity_curve),
+                        y: Object.values(data.equity_curve),
+                        type: 'scatter',
+                        name: symbol.toUpperCase(),
+                        line: { width: 2 }
+                      }))}
+                      layout={{
+                        autosize: true,
+                        paper_bgcolor: 'rgba(0,0,0,0)',
+                        plot_bgcolor: 'rgba(0,0,0,0)',
+                        font: { color: '#fff', family: 'Inter' },
+                        margin: { l: 40, r: 0, t: 10, b: 40 },
+                        xaxis: { gridcolor: 'rgba(255,255,255,0.05)', zeroline: false },
+                        yaxis: { gridcolor: 'rgba(255,255,255,0.05)', zeroline: false },
+                      }}
+                      style={{ width: '100%', height: '400px' }}
+                      config={{ responsive: true, displayModeBar: false }}
+                    />
                   </div>
 
                   {/* Per Symbol Analysis Section */}
@@ -214,7 +239,7 @@ export default function Home() {
                       ))}
                     </div>
 
-                    {Object.entries(backtestResults).map(([symbol, data]: [string, any]) => (
+                    {(Object.entries(backtestResults) as any[]).map(([symbol, data]: [string, any]) => (
                       <div key={symbol} className="glass-card" style={{ marginBottom: '24px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                           <h4 style={{ color: 'var(--primary)' }}>{symbol.toUpperCase()} Detailed Analytics</h4>
