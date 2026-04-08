@@ -28,7 +28,8 @@ export default function Home() {
             "joblib",
             "scikit-learn",
             "breeze-connect",
-            "pytz"
+            "pytz",
+            "seaborn"
           ],
           entrypoint: "streamlit_app.py",
           files: {
