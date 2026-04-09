@@ -5,8 +5,6 @@ import streamlit as st
 import tickbus
 import pandas as pd
 import numpy as np
-import urllib.parse
-import seaborn as sns
 from urllib.parse import quote_plus
 from queue import Queue
 import logging
@@ -21,6 +19,7 @@ from breeze_connect import BreezeConnect
 import ta
 import time
 import io
+joblib = None
 import pytz  # <<< NEW
 IST = pytz.timezone("Asia/Kolkata")  # <<< NEW (Gurgaon/India standard time)
 

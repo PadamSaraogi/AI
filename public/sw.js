@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stlite-cache-v1';
+const CACHE_NAME = 'stlite-cache-v2';
 const STLITE_VERSION = '0.75.0';
 
 // Assets to cache immediately on install
