@@ -32,15 +32,15 @@ export default function Home() {
       setLoadingStep((prev) => (prev < LOADING_STEPS.length - 1 ? prev + 1 : prev));
     }, 4000);
 
-    // Inject the stlite styles (local or preloaded)
+    // Inject the stlite styles (CDN)
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = '/stlite.css';
+    link.href = 'https://cdn.jsdelivr.net/npm/@stlite/mountable@0.75.0/build/stlite.css';
     document.head.appendChild(link);
 
-    // Inject the stlite script (local or preloaded)
+    // Inject the stlite script (CDN)
     const script = document.createElement('script');
-    script.src = '/stlite.js';
+    script.src = 'https://cdn.jsdelivr.net/npm/@stlite/mountable@0.75.0/build/stlite.js';
     script.async = true;
     script.onload = () => {
       if ((window as any).stlite && mountPoint.current) {
