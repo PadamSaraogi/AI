@@ -11,16 +11,14 @@ from urllib.parse import quote_plus
 from queue import Queue
 import logging
 import streamlit.components.v1 as components
-import matplotlib.pyplot as plt
 import plotly.graph_objects as go
+import plotly.express as px
 from backtest import run_backtest_simulation
 import datetime
 import threading
 import queue
 from breeze_connect import BreezeConnect
 import ta
-import sys
-import joblib
 import time
 import io
 import pytz  # <<< NEW
@@ -237,26 +235,29 @@ with tab1:
                         buy_hold_pnl = portfolio_value - initial_portfolio_value
                         buy_hold_pnl_over_time.append(buy_hold_pnl)
 
-                    fig_water, ax_water = plt.subplots(figsize=(12, 4))
-                    ax_water.bar(
-                        range(len(all_trades_combined)),
-                        all_trades_combined["net_pnl"],
-                        bottom=bottoms,
-                        color=["green" if x >= 0 else "red" for x in all_trades_combined["net_pnl"]],
-                        label='Strategy Cumulative'
+                    fig_water = go.Figure()
+                    fig_water.add_trace(go.Bar(
+                        x=list(range(len(all_trades_combined))),
+                        y=all_trades_combined["net_pnl"],
+                        base=bottoms,
+                        marker_color=["#00ff00" if x >= 0 else "#ff0000" for x in all_trades_combined["net_pnl"]],
+                        name='Strategy PnL'
+                    ))
+                    fig_water.add_trace(go.Scatter(
+                        x=list(range(len(all_trades_combined))),
+                        y=buy_hold_pnl_over_time,
+                        line=dict(color='#39ff14', width=3),
+                        name='Buy & Hold'
+                    ))
+                    fig_water.update_layout(
+                        title="Trade-by-Trade Net PnL Contribution (Portfolio)",
+                        xaxis_title="Trade Index",
+                        yaxis_title="Net PnL (₹)",
+                        template="plotly_dark",
+                        height=400,
+                        margin=dict(l=0, r=0, t=40, b=0)
                     )
-                    ax_water.plot(
-                        range(len(all_trades_combined)),
-                        buy_hold_pnl_over_time,
-                        color='blue',
-                        linewidth=2,
-                        label='Buy & Hold'
-                    )
-                    ax_water.set_xlabel("Trade Index")
-                    ax_water.set_ylabel("Net PnL (₹)")
-                    ax_water.set_title("Trade-by-Trade Net PnL Contribution (Portfolio) with Buy & Hold Over Time")
-                    ax_water.legend()
-                    st.pyplot(fig_water)
+                    st.plotly_chart(fig_water, use_container_width=True)
 
                 final_values = [
                     all_trades[s]["capital_after_trade"].iloc[-1] if not all_trades[s].empty else capital_per_stock
@@ -272,12 +273,14 @@ with tab1:
                 st.plotly_chart(fig_alloc)
 
                 st.subheader("Portfolio Drawdown")
-                fig_dd, ax_dd = plt.subplots(figsize=(10, 4))
-                drawdowns.plot(ax=ax_dd, color="red")
-                ax_dd.set_ylabel("Drawdown")
-                ax_dd.set_xlabel("Date")
-                ax_dd.grid(True)
-                st.pyplot(fig_dd)
+                fig_dd = px.line(
+                    drawdowns, 
+                    title="Portfolio Drawdown",
+                    labels={'value': 'Drawdown', 'index': 'Date'}
+                )
+                fig_dd.update_traces(line_color='#ff073a')
+                fig_dd.update_layout(template="plotly_dark", height=400)
+                st.plotly_chart(fig_dd, use_container_width=True)
 
                 # Portfolio leaderboard
                 summary_data = []
@@ -310,10 +313,15 @@ with tab1:
 
                 # Ensure all values are finite and matrix isn't empty
                 if not returns_corr.empty and np.isfinite(returns_corr.values).all():
-                    fig_corr, ax_corr = plt.subplots(figsize=(8, 6))
-                    sns.heatmap(returns_corr, annot=True, cmap="RdBu", center=0, linewidths=.5, fmt=".2f", ax=ax_corr)
-                    ax_corr.set_title("Correlation Heatmap (Daily Returns)")
-                    st.pyplot(fig_corr)
+                    fig_corr = px.imshow(
+                        returns_corr,
+                        text_auto=".2f",
+                        color_continuous_scale='RdBu_r',
+                        zmin=-1, zmax=1,
+                        title="Correlation Heatmap (Daily Returns)"
+                    )
+                    fig_corr.update_layout(template="plotly_dark", height=500)
+                    st.plotly_chart(fig_corr, use_container_width=True)
                 else:
                     st.info("Not enough data to display correlation heatmap. Please upload several stocks with sufficient history.")
 
@@ -327,16 +335,17 @@ with tab1:
                     rolling_sortino = rets.rolling(window).mean() / rolling_downside.rolling(window).std() * np.sqrt(252)
 
                     st.markdown("### Rolling Sharpe & Sortino Ratios (Portfolio)")
-                    fig, ax = plt.subplots(figsize=(12, 5))
-                    rolling_sharpe.plot(ax=ax, label='Sharpe Ratio')
-                    rolling_sortino.plot(ax=ax, label='Sortino Ratio')
-                    ax.axhline(0, color='black', linewidth=0.7, linestyle='--')
-                    ax.set_ylabel("Ratio (annualized)")
-                    ax.set_xlabel("Date")
-                    ax.legend()
-                    ax.set_title(f"Rolling {window}-Day Portfolio Sharpe/Sortino")
-                    ax.grid(True)
-                    st.pyplot(fig)
+                    fig_rolling = go.Figure()
+                    fig_rolling.add_trace(go.Scatter(x=rolling_sharpe.index, y=rolling_sharpe.values, name='Sharpe Ratio'))
+                    fig_rolling.add_trace(go.Scatter(x=rolling_sortino.index, y=rolling_sortino.values, name='Sortino Ratio'))
+                    fig_rolling.update_layout(
+                        title=f"Rolling {window}-Day Portfolio Sharpe/Sortino",
+                        xaxis_title="Date",
+                        yaxis_title="Ratio (annualized)",
+                        template="plotly_dark",
+                        height=500
+                    )
+                    st.plotly_chart(fig_rolling, use_container_width=True)
                 else:
                     st.info("Portfolio equity curve not available for rolling ratios.")
 
@@ -437,12 +446,10 @@ with tab1:
             c3.metric("Net PnL (₹)", f"{trades_df['net_pnl'].sum():,.2f}" if not trades_df.empty else "0.00")
 
             st.subheader(f"{symbol_select.upper()} Equity Curve")
-            fig_eq, ax = plt.subplots(figsize=(10, 4))
-            equity_curve.plot(ax=ax, color="green", linewidth=2)
-            ax.set_xlabel("Date")
-            ax.set_ylabel("Capital (₹)")
-            ax.grid(True)
-            st.pyplot(fig_eq)
+            fig_eq = px.line(equity_curve, title=f"{symbol_select.upper()} Equity Curve")
+            fig_eq.update_traces(line_color='#39ff14')
+            fig_eq.update_layout(template="plotly_dark", height=400)
+            st.plotly_chart(fig_eq, use_container_width=True)
 
             st.subheader(f"Candlestick Chart with Trades ({symbol_select.upper()})")
             signals_df = stock_data[symbol_select]['signals']
@@ -484,13 +491,11 @@ with tab1:
 
             st.subheader(f"{symbol_select.upper()} Drawdown")
             eq_cumret = equity_curve / equity_curve.iloc[0]
-            drawdowns = eq_cumret / eq_cumret.cummax() - 1
-            fig_dd, ax_dd = plt.subplots(figsize=(10, 4))
-            drawdowns.plot(ax=ax_dd, color="red")
-            ax_dd.set_ylabel("Drawdown")
-            ax_dd.set_xlabel("Date")
-            ax_dd.grid(True)
-            st.pyplot(fig_dd)
+            drawdowns_s = eq_cumret / eq_cumret.cummax() - 1
+            fig_dd_s = px.line(drawdowns_s, title=f"{symbol_select.upper()} Drawdown")
+            fig_dd_s.update_traces(line_color='#ff073a')
+            fig_dd_s.update_layout(template="plotly_dark", height=400)
+            st.plotly_chart(fig_dd_s, use_container_width=True)
 
             # Convert to datetime if needed (keep timezone-naive here since source is historical)
             trades_df['entry_time'] = pd.to_datetime(trades_df['entry_time'])
@@ -626,13 +631,19 @@ with tab1:
                 wins = [length for win, length in streaks if win]
                 losses = [length for win, length in streaks if not win]
 
-                fig, ax = plt.subplots(figsize=(12, 4))
-                ax.hist(wins, bins=range(1, max(wins)+2) if wins else [1,2], alpha=0.7, label='Winning Streaks', color='green')
-                ax.hist(losses, bins=range(1, max(losses)+2) if losses else [1,2], alpha=0.7, label='Losing Streaks', color='red')
-                ax.set_xlabel('Streak Length (Number of Trades)')
-                ax.set_ylabel('Frequency')
-                ax.legend()
-                st.pyplot(fig)
+                fig_streak = go.Figure()
+                fig_streak.add_trace(go.Histogram(x=wins, name='Winning Streaks', marker_color='green'))
+                fig_streak.add_trace(go.Histogram(x=losses, name='Losing Streaks', marker_color='red'))
+                fig_streak.update_layout(
+                    title="Win/Loss Streaks",
+                    xaxis_title="Streak Length (Number of Trades)",
+                    yaxis_title="Frequency",
+                    barmode='overlay',
+                    template="plotly_dark",
+                    height=400
+                )
+                fig_streak.update_traces(opacity=0.75)
+                st.plotly_chart(fig_streak, use_container_width=True)
             else:
                 st.info("No trade data for streak analysis.")
 
